@@ -26,6 +26,8 @@
     "exit_code": { "type": ["integer", "null"] },
     "image": { "type": "string", "pattern": "@sha256:[0-9a-f]{64}$" },
     "docker_image_id": { "type": "string", "minLength": 1 },
+    "export_helper_image": { "type": "string", "pattern": "@sha256:[0-9a-f]{64}$" },
+    "export_helper_image_id": { "type": "string", "minLength": 1 },
     "command_argv": {
       "type": "array",
       "minItems": 1,
@@ -83,6 +85,7 @@
     },
     "artifact_inventory_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "container_cleanup_confirmed": { "type": "boolean" },
+    "output_volume_cleanup_confirmed": { "type": "boolean" },
     "output_path": { "type": "string" },
     "command_executable": { "type": "string" },
     "note": { "type": "string" },
