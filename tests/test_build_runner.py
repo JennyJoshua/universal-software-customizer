@@ -143,13 +143,11 @@ def test_runner_uses_restricted_container_and_reports_success(tmp_path, monkeypa
             return subprocess.CompletedProcess(argv, 0, stdout="sha256:" + "b" * 64, stderr="")
         if argv[1] == "inspect":
             return subprocess.CompletedProcess(argv, 0, stdout="true", stderr="")
-        if argv[1] == "inspect":
-            return subprocess.CompletedProcess(argv, 0, stdout="true", stderr="")
         if argv[1] == "cp":
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if argv[1:3] == ["ps", "-aq"]:
             ps_calls["count"] += 1
-            found = "fixture-container" if ps_calls["count"] < 3 else ""
+            found = "fixture-container" if ps_calls["count"] == 1 else ""
             return subprocess.CompletedProcess(argv, 0, stdout=found, stderr="")
         if argv[1:3] == ["rm", "-f"]:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
