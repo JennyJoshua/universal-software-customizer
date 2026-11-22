@@ -56,24 +56,9 @@ Receipts use an HMAC key stored under the current user's `~/.usc` directory (dir
 
 The current allowlist intentionally contains only `python-pytest`. Additional profiles require a separate reviewed change and tests. The user-facing workflow requires a clean Git source and refuses non-Git or dirty directories. Keep using synthetic fixtures only; this CLI work does not enable customer repositories.
 
-## Invocation contract
+## Low-level Python API boundary
 
-The Python API is customizer.build_runner.run_isolated_build. It accepts a source directory, an existing output directory, a digest-pinned image, an argv list, and approved=True. The caller must obtain that approval through a separate human-reviewed workflow; the boolean is not a substitute for a user-facing approval gate.
-
-Example (illustrative only; replace the placeholder with a verified, locally provisioned 64-character digest):
-
-~~~python
-from customizer.build_runner import run_isolated_build
-
-report = run_isolated_build(
-    "./candidate",
-    "./build-output",
-    image="python:3.12-slim@sha256:<verified-64-character-digest>",
-    command=["python", "-m", "pytest", "-q"],
-    approved=True,
-    timeout_seconds=300,
-)
-~~~
+The Python function `customizer.build_runner.run_isolated_build` is a low-level internal interface. Its `approved=True` argument is not a substitute for the reviewed CLI receipt workflow and can bypass that workflow when called directly by application code. Normal build requests must use `usc build-request`, `usc build-approve`, and `usc build-run` as described above. Do not expose the low-level function directly to untrusted callers.
 
 Do not pass secrets in command arguments or source files. A mounted source tree is readable to the build process; the runner does not make arbitrary source contents confidential. The output tmpfs is limited to 256 MB and the temporary filesystem to 64 MB. Keep secrets out of fixture and candidate trees.
 
