@@ -226,3 +226,17 @@ def test_cli_build_run_consumes_receipt_and_calls_only_approved_profile(tmp_path
         consume_build_approval(
             receipt_path, source_path=source, output_path=output,
         )
+
+
+
+def test_container_smoke_profile_is_fixed_and_allowlisted():
+    from customizer.build_approval import available_build_profiles
+
+    profiles = available_build_profiles()
+    assert "python-container-smoke" in profiles
+    command = profiles["python-container-smoke"]["command"]
+    assert command[:2] == ["python", "-c"]
+    assert "os.geteuid()!=0" in command[2]
+    assert "'/src'" in command[2]
+    assert "'/out'" in command[2]
+    assert "connect_ex" in command[2]
