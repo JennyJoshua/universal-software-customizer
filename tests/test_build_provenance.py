@@ -15,7 +15,7 @@ from customizer.build_provenance import (
     create_build_provenance_manifest,
     validate_build_provenance,
 )
-from customizer.build_runner import _stage_source_snapshot
+from customizer.build_runner import _EXPORT_HELPER_IMAGE, _stage_source_snapshot
 
 
 SCHEMA_PATH = (
@@ -61,7 +61,7 @@ def _manifest():
             "command_sha256": digest,
             "image": "python:3.12-slim@sha256:" + digest,
             "docker_image_id": "sha256:" + digest,
-            "export_helper_image": "busybox@sha256:" + "d" * 64,
+            "export_helper_image": _EXPORT_HELPER_IMAGE,
             "export_helper_image_id": "sha256:" + "e" * 64,
             "output_volume_cleanup_confirmed": True,
             "source_snapshot_sha256": digest,
