@@ -204,7 +204,7 @@ def _write_evidence(root: Path, evidence_root: Path, artifacts_root: Path) -> tu
         "exit_code": 0,
         "image": "python:3.12-slim@sha256:" + "a" * 64,
         "docker_image_id": "sha256:" + "b" * 64,
-        "export_helper_image": "busybox@sha256:" + "d" * 64,
+        "export_helper_image": _EXPORT_HELPER_IMAGE,
         "export_helper_image_id": "sha256:" + "e" * 64,
         "output_volume_cleanup_confirmed": True,
         "docker_engine_version": "27.0",
