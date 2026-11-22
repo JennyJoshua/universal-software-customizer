@@ -143,6 +143,8 @@ def test_runner_uses_restricted_container_and_reports_success(tmp_path, monkeypa
             return subprocess.CompletedProcess(argv, 0, stdout="sha256:" + "b" * 64, stderr="")
         if argv[1] == "inspect":
             return subprocess.CompletedProcess(argv, 0, stdout="true", stderr="")
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(argv, 0, stdout="true", stderr="")
         if argv[1] == "cp":
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if argv[1:3] == ["ps", "-aq"]:
@@ -239,6 +241,8 @@ def test_runner_marks_container_cleanup_failure_as_blocked(tmp_path, monkeypatch
             return subprocess.CompletedProcess(argv, 0, stdout="27.0", stderr="")
         if argv[1:3] == ["image", "inspect"]:
             return subprocess.CompletedProcess(argv, 0, stdout="sha256:" + "b" * 64, stderr="")
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(argv, 0, stdout="true", stderr="")
         if argv[1] == "cp":
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if argv[1:3] == ["ps", "-aq"]:
@@ -497,6 +501,8 @@ def test_runner_records_missing_command_and_nonzero_exit_without_source_mutation
             return subprocess.CompletedProcess(argv, 0, stdout="27.0", stderr="")
         if argv[1:3] == ["image", "inspect"]:
             return subprocess.CompletedProcess(argv, 0, stdout="sha256:" + "b" * 64, stderr="")
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(argv, 0, stdout="true", stderr="")
         if argv[1] == "cp":
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if argv[1:3] == ["ps", "-aq"]:
