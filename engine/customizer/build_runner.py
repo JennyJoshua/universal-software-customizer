@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .build_evidence import create_artifact_inventory, inspect_git_source, redact_build_logs, validate_build_evidence
+from .source_secret_scan import SourceSecretScanner
 
 _PINNED_IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 _SHELLS = {"sh", "bash", "dash", "zsh", "fish", "cmd", "powershell", "pwsh"}
@@ -331,6 +332,7 @@ def _stage_source_snapshot(
                 algorithm = "sha1" if len(expected_blob) == 40 else "sha256"
                 git_blob_digest = hashlib.new(algorithm)
                 git_blob_digest.update(f"blob {metadata.st_size}\0".encode("ascii"))
+            secret_scanner = SourceSecretScanner()
             with path.open("rb") as source_file, target.open("xb") as target_file:
                 while True:
                     chunk = source_file.read(1024 * 1024)
@@ -339,6 +341,13 @@ def _stage_source_snapshot(
                     copied_bytes += len(chunk)
                     if copied_bytes > _MAX_SINGLE_SOURCE_FILE:
                         raise ValueError(f"Source file grew beyond the per-file limit during snapshot: {relative_text}")
+                    secret_scanner.feed(chunk)
+                    if secret_scanner.findings:
+                        rules = ", ".join(sorted(secret_scanner.findings))
+                        raise ValueError(
+                            f"Potential credential material detected in source file {relative_text!r} "
+                            f"(rules: {rules}); remove it or place it in a supported excluded secret path."
+                        )
                     digest.update(chunk)
                     if git_blob_digest is not None:
                         git_blob_digest.update(chunk)
