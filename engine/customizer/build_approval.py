@@ -20,7 +20,7 @@ from typing import Any
 
 from .build_evidence import inspect_git_source
 
-_IMAGE = re.compile(r"^[^\\s@]+@sha256:[0-9a-f]{64}$")
+_IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 _MAX_TTL_SECONDS = 1800
 _MIN_TTL_SECONDS = 60
 _MAX_LOG_BYTES = 1_048_576
