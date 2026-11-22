@@ -162,8 +162,11 @@ def test_expired_request_and_receipt_are_rejected(tmp_path):
         )
 
 
-def test_cli_build_request_and_approval_commands(tmp_path, capsys):
+def test_cli_build_request_and_approval_commands(tmp_path, capsys, monkeypatch):
     from customizer.cli import main
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
 
     source = tmp_path / "source"
     _git_source(source)
@@ -187,3 +190,39 @@ def test_cli_build_request_and_approval_commands(tmp_path, capsys):
         "--output", str(receipt_path), "--approve",
     ]) == 0
     assert json.loads(receipt_path.read_text(encoding="utf-8"))["operation"] == "usc_build_approval_receipt"
+
+
+def test_cli_build_run_consumes_receipt_and_calls_only_approved_profile(tmp_path, monkeypatch, capsys):
+    from customizer.cli import main
+
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    monkeypatch.setattr("pathlib.Path.home", lambda: home)
+    source = tmp_path / "source"
+    _git_source(source)
+    request_path, _ = _request(tmp_path, source)
+    receipt_path = tmp_path / "receipt.json"
+    approve_build_request(request_path, approved=True)
+    receipt_path.write_text(json.dumps(approve_build_request(request_path, approved=True)), encoding="utf-8")
+    output = tmp_path / "artifacts"
+    output.mkdir()
+    captured = {}
+
+    def fake_runner(source_path, output_path, **kwargs):
+        captured.update({"source": source_path, "output": output_path, **kwargs})
+        return {"status": "passed", "operation": "isolated_build", "executed": True}
+
+    monkeypatch.setattr("customizer.cli.run_isolated_build", fake_runner)
+    report_path = tmp_path / "evidence.json"
+    assert main([
+        "build-run", "--approval", str(receipt_path), "--path", str(source),
+        "--output-dir", str(output), "--report", str(report_path),
+    ]) == 0
+    assert captured["command"] == ["python", "-m", "pytest", "-q"]
+    assert captured["approved"] is True
+    assert json.loads(report_path.read_text(encoding="utf-8"))["status"] == "passed"
+
+    with pytest.raises(ValueError, match="already been used"):
+        consume_build_approval(
+            receipt_path, source_path=source, output_path=output,
+        )
