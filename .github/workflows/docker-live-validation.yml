@@ -62,15 +62,15 @@ jobs:
           }
           trap cleanup EXIT
           mkdir -p "$OUTPUT"
-          docker volume create --driver local \\
-            --opt type=tmpfs --opt device=tmpfs \\
-            --opt "o=size=16m,uid=$(id -u),gid=$(id -g),mode=0700" \\
+          docker volume create --driver local \
+            --opt type=tmpfs --opt device=tmpfs \
+            --opt "o=size=16m,uid=$(id -u),gid=$(id -g),mode=0700" \
             --label com.usc.test=volume-export "$VOLUME"
-          docker create --name "$CONTAINER" \\
-            --user="$(id -u):$(id -g)" \\
-            --mount "type=volume,src=$VOLUME,dst=/out" \\
-            --entrypoint python "$USC_TEST_IMAGE" \\
-            -c "from pathlib import Path; Path('/out/probe.txt').write_text('tmpfs volume survived stop\\\\n')"
+          docker create --name "$CONTAINER" \
+            --user="$(id -u):$(id -g)" \
+            --mount "type=volume,src=$VOLUME,dst=/out" \
+            --entrypoint python "$USC_TEST_IMAGE" \
+            -c "from pathlib import Path; Path('/out/probe.txt').write_text('tmpfs volume survived stop\n')"
           docker start -a "$CONTAINER"
           docker cp "$CONTAINER:/out/." "$OUTPUT"
           test "$(cat "$OUTPUT/probe.txt")" = "tmpfs volume survived stop"
