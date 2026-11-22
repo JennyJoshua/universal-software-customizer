@@ -29,6 +29,22 @@ _PROFILES = {
         "command": ["python", "-m", "pytest", "-q"],
         "description": "Run the Python test suite with pytest in quiet mode.",
     },
+    "python-container-smoke": {
+        "command": [
+            "python", "-c",
+            "from pathlib import Path; import os,socket; "
+            "m=[x.split() for x in Path('/proc/mounts').read_text().splitlines() if len(x.split())>=4]; "
+            "assert os.geteuid()!=0; "
+            "assert any(x[1]=='/' and 'ro' in x[3].split(',') for x in m); "
+            "assert any(x[1]=='/src' and 'ro' in x[3].split(',') for x in m); "
+            "assert any(x[1]=='/out' and 'rw' in x[3].split(',') for x in m); "
+            "assert Path('/src/fixture.txt').read_text()=='USC docker smoke fixture\\n'; "
+            "s=socket.socket(); s.settimeout(2); assert s.connect_ex(('1.1.1.1',443)) != 0; "
+            "Path('/out/smoke-result.txt').write_text('isolated runner passed\\n'); "
+            "print('USC isolated Docker smoke test passed')",
+        ],
+        "description": "Verify a synthetic fixture, non-root identity, read-only root/source mounts, writable output tmpfs, and disabled networking.",
+    },
 }
 
 
