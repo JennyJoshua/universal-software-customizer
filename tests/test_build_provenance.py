@@ -389,3 +389,21 @@ def test_create_manifest_rejects_passed_evidence_without_volume_cleanup(tmp_path
 
     with pytest.raises(ValueError, match="must confirm cleanup"):
         create_build_provenance_manifest(source, evidence_root, "build-report.json", artifacts)
+
+
+
+def test_create_manifest_rejects_unapproved_export_helper_image(tmp_path):
+    source = tmp_path / "source"
+    _make_source(source)
+    evidence_root = tmp_path / "evidence"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "app.zip").write_bytes(b"synthetic build artifact")
+    _write_evidence(source, evidence_root, artifacts)
+    report_path = evidence_root / "build-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["export_helper_image"] = "busybox@sha256:" + "f" * 64
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="pinned USC export-helper image"):
+        create_build_provenance_manifest(source, evidence_root, "build-report.json", artifacts)
