@@ -196,15 +196,15 @@ def main(argv: list[str] | None = None) -> int:
             request_data = json.loads(request_path.read_text(encoding="utf-8"))
             source_root = Path(request_data["source_path"]).expanduser().resolve(strict=True)
             print(
-                "USC build approval review:\\n"
-                f"  Source: {source_root}\\n"
-                f"  Commit: {request_data.get('source_git_commit_sha')}\\n"
-                f"  Tree: {request_data.get('source_git_tree_sha')}\\n"
-                f"  Image: {request_data.get('image')}\\n"
-                f"  Profile: {request_data.get('profile')}\\n"
-                f"  Command: {request_data.get('command_argv')}\\n"
-                f"  Timeout: {request_data.get('timeout_seconds')} seconds\\n"
-                f"  Expires: {request_data.get('expires_at')}\\n"
+                "USC build approval review:\n"
+                f"  Source: {source_root}\n"
+                f"  Commit: {request_data.get('source_git_commit_sha')}\n"
+                f"  Tree: {request_data.get('source_git_tree_sha')}\n"
+                f"  Image: {request_data.get('image')}\n"
+                f"  Profile: {request_data.get('profile')}\n"
+                f"  Command: {request_data.get('command_argv')}\n"
+                f"  Timeout: {request_data.get('timeout_seconds')} seconds\n"
+                f"  Expires: {request_data.get('expires_at')}\n"
                 "  Release/deployment: NOT authorized",
                 file=sys.stderr,
             )
