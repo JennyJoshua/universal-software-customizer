@@ -20,6 +20,7 @@ from .build_evidence import create_artifact_inventory, inspect_git_source, redac
 from .source_secret_scan import SourceSecretScanner
 
 _PINNED_IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
+_EXPORT_HELPER_IMAGE = "busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
 _SHELLS = {"sh", "bash", "dash", "zsh", "fish", "cmd", "powershell", "pwsh"}
 _MAX_TIMEOUT = 3600
 _MAX_LOG_BYTES = 1_048_576
@@ -382,13 +383,57 @@ def _labelled_container_ids(docker: str, label: str) -> list[str] | None:
         return None
 
 
-def _export_container_output(docker: str, label: str, output: Path) -> bool:
-    container_ids = _labelled_container_ids(docker, label)
-    if container_ids is None or len(container_ids) != 1:
-        return False
+def _create_output_volume(docker: str, volume_name: str, run_id: str) -> bool:
+    """Create a bounded Docker-managed tmpfs volume for build artifacts."""
     try:
+        created = subprocess.run(
+            [
+                docker, "volume", "create", "--driver", "local",
+                "--opt", "type=tmpfs", "--opt", "device=tmpfs",
+                "--opt", f"o=size=256m,uid={os.getuid()},gid={os.getgid()},mode=0700",
+                "--label", f"com.usc.build-volume={run_id}", volume_name,
+            ],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        return created.returncode == 0 and created.stdout.strip() == volume_name
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _start_export_helper(docker: str, volume_name: str, run_label: str) -> str | None:
+    """Keep the output tmpfs mounted read-only until the host has copied its contents."""
+    argv = [
+        docker, "run", "-d", "--pull=never", "--network=none", "--read-only",
+        f"--user={os.getuid()}:{os.getgid()}", "--cap-drop=ALL",
+        "--security-opt=no-new-privileges:true",
+        "--pids-limit=16", "--memory=64m", "--cpus=0.25",
+        f"--mount=type=volume,src={volume_name},dst=/out,readonly",
+        f"--label={run_label}", "--entrypoint=/bin/sleep",
+        _EXPORT_HELPER_IMAGE, "7200",
+    ]
+    try:
+        started = subprocess.run(
+            argv, capture_output=True, text=True, timeout=15, check=False,
+        )
+        if started.returncode != 0:
+            return None
+        container_id = started.stdout.strip()
+        return container_id or None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _export_container_output(docker: str, exporter_container_id: str, output: Path) -> bool:
+    """Copy output while the restricted helper still holds the tmpfs volume mounted."""
+    try:
+        running = subprocess.run(
+            [docker, "inspect", "--format", "{{.State.Running}}", exporter_container_id],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        if running.returncode != 0 or running.stdout.strip().lower() != "true":
+            return False
         copied = subprocess.run(
-            [docker, "cp", f"{container_ids[0]}:/out/.", str(output)],
+            [docker, "cp", f"{exporter_container_id}:/out/.", str(output)],
             capture_output=True, text=True, timeout=60, check=False,
         )
         if copied.returncode != 0:
@@ -398,6 +443,17 @@ def _export_container_output(docker: str, label: str, output: Path) -> bool:
                 if (Path(root) / name).is_symlink():
                     return False
         return True
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _cleanup_output_volume(docker: str, volume_name: str) -> bool:
+    try:
+        removed = subprocess.run(
+            [docker, "volume", "rm", "-f", volume_name],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        return removed.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
