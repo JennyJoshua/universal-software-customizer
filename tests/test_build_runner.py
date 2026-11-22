@@ -747,6 +747,8 @@ def test_runner_blocks_before_execution_when_export_helper_cannot_start(tmp_path
     monkeypatch.setattr("customizer.build_runner.shutil.which", lambda _name: "/usr/bin/docker")
     monkeypatch.setattr("customizer.build_runner._probe_toolchain", lambda *args, **kwargs: [])
     def fake_run(argv, **kwargs):
+        if argv[1:2] == ["info"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="29.4.2", stderr="")
         if argv[1:3] == ["image", "inspect"]:
             return subprocess.CompletedProcess(argv, 0, stdout="sha256:" + "b" * 64, stderr="")
         if Path(argv[0]).name == "git":
