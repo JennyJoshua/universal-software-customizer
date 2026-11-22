@@ -69,8 +69,8 @@
 - [x] Implement detached manifest construction, evidence/artifact digest verification, exact Git-tree-to-snapshot revalidation, and accepted-sync provenance cross-checks (PR #61).
 - [x] Capture a fixed in-image toolchain inventory with bounded version output, per-probe isolation, and deterministic digest in build evidence and provenance (PR #63; CI #246 passed).
 - [ ] Add a reviewed command-profile/CLI approval workflow; current runner remains an internal API and the existing `approved=True` argument is not a user-facing approval gate.
-- [ ] Validate the runner against a live Docker daemon and verify actual runtime isolation/cleanup behaviour; current runner tests use fake Docker processes.
-- [ ] Complete failure-injection coverage for remaining output-path/export edge cases.
+- [x] Validate the runner against a live Docker 29.4.2 daemon using a synthetic clean Git fixture, digest-pinned Python build image, and pinned BusyBox exporter helper; verify non-root identity, network-disabled execution, read-only root/source, bounded tmpfs output, artifact export, and container/volume cleanup (trusted-main workflow run #5). This is a runtime smoke test, not a container-escape penetration test.
+- [ ] Complete failure-injection coverage for remaining output-path/export races, helper startup, volume creation/removal, and interrupted export.
 - [ ] Keep artifacts detached from automatic public release; no automatic publishing or deployment is authorized.
 
 ## Phase 7 — Additional adapters
