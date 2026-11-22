@@ -58,7 +58,7 @@
 
 ## Phase 6 — Isolated build and provenance
 
-- [x] Add the initial Docker-only isolated build runner API: explicit approval, digest-pinned pre-provisioned image, no network, non-root execution, read-only source, bounded tmpfs output, resource/time/log limits, and cleanup verification (PR #55). This is not yet a customer-ready workflow or CLI.
+- [x] Add the Docker-only isolated build runner API and reviewed CLI workflow: explicit approval, digest-pinned pre-provisioned images, no network, non-root execution, read-only source/root, bounded tmpfs output, resource/time/log limits, and cleanup verification (PR #55, #66). Customer execution remains disabled pending separate security review.
 - [x] Stage a bounded immutable source snapshot, exclude VCS/USC metadata and known credential paths, reject symlinks/non-regular files, strip privileged mode bits, and compute a deterministic USC SHA-256 content fingerprint (PR #56).
 - [x] Bind the source snapshot to the exact Git commit/tree identity and included committed blob IDs; reject dirty/index-mismatched, ignored/untracked, symlink, submodule, filter/smudge, and staging-race cases (PR #59).
 - [x] Add bounded content scanning for selected high-confidence credential formats; block snapshot creation on findings and report only rule IDs/path, never matched values (PR #64; CI #252 passed). This is defence in depth, not comprehensive secret detection.
@@ -67,10 +67,10 @@
 - [x] Bind build evidence and artifact inventory to the accepted upstream baseline and sync history through the validated detached manifest (PR #61).
 - [x] Define a detached, versioned build provenance manifest contract and strict JSON Schema covering source, upstream, customization, build evidence, artifact hashes, and no-release state (PR #58).
 - [x] Implement detached manifest construction, evidence/artifact digest verification, exact Git-tree-to-snapshot revalidation, and accepted-sync provenance cross-checks (PR #61).
-- [x] Record the exact pinned USC exporter image reference/ID and output-volume cleanup result in build provenance; reject passed build evidence without confirmed volume cleanup (Phase 6 evidence-hardening batch).
+- [x] Record the exact pinned USC exporter image reference/ID and output-volume cleanup result in build provenance; reject passed build evidence without confirmed volume cleanup (PR #72).\n- [x] Export artifacts through a restricted helper holding the bounded tmpfs volume, stage privately, verify inventory, and merge without overwriting concurrent output entries (PR #71, #73).
 - [x] Capture a fixed in-image toolchain inventory with bounded version output, per-probe isolation, and deterministic digest in build evidence and provenance (PR #63; CI #246 passed).
 - [x] Add a reviewed CLI approval workflow with short-lived HMAC-authenticated receipts, exact clean Git revision/image/profile binding, explicit review, fixed allowlisted argv, expiry, and one-time replay protection (PR #66; CI #256 passed). Initial profiles are `python-pytest` and synthetic-only `python-container-smoke`; local HMAC state is a guardrail, not external identity proof.
-- [x] Validate the runner against a live Docker 29.4.2 daemon using a synthetic clean Git fixture, digest-pinned Python build image, and pinned BusyBox exporter helper; verify non-root identity, network-disabled execution, read-only root/source, bounded tmpfs output, artifact export, and container/volume cleanup (trusted-main workflow run #5). This is a runtime smoke test, not a container-escape penetration test.
+- [x] Validate the runner against a live Docker 29.4.2 daemon using a synthetic clean Git fixture, digest-pinned Python build image, and pinned BusyBox exporter helper; verify non-root identity, network-disabled execution, read-only root/source, bounded tmpfs output, artifact export, and container/volume cleanup (trusted-main workflow runs #5 and #6). This is a runtime smoke test, not a container-escape penetration test.
 - [ ] Complete failure-injection coverage for remaining output-path/export races, helper startup, volume creation/removal, and interrupted export.
 - [ ] Keep artifacts detached from automatic public release; no automatic publishing or deployment is authorized.
 
