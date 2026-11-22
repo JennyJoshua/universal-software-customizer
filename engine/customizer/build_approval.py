@@ -190,6 +190,12 @@ def approve_build_request(
         raise ValueError("Build request command does not match a fixed allowlisted profile.")
     if not _IMAGE.fullmatch(str(request.get("image", ""))):
         raise ValueError("Build request image is not digest-pinned.")
+    if isinstance(request.get("timeout_seconds"), bool) or not isinstance(request.get("timeout_seconds"), int) or not 1 <= request["timeout_seconds"] <= 3600:
+        raise ValueError("Build request timeout is invalid.")
+    if request.get("max_log_bytes") != _MAX_LOG_BYTES:
+        raise ValueError("Build request log limit is invalid.")
+    if not isinstance(request.get("approval_id"), str) or not re.fullmatch(r"[0-9a-f-]{36}", request["approval_id"]):
+        raise ValueError("Build request approval ID is invalid.")
     source, identity = _source_identity(request["source_path"])
     if (
         str(source) != request["source_path"]
@@ -255,12 +261,18 @@ def consume_build_approval(
         raise ValueError("Approved command profile is invalid or has changed.")
     if not _IMAGE.fullmatch(str(request.get("image", ""))):
         raise ValueError("Approved image is not digest-pinned.")
+    if request.get("release_authorized") is not False:
+        raise ValueError("Build approval cannot authorize release or deployment.")
+    if isinstance(request.get("timeout_seconds"), bool) or not isinstance(request.get("timeout_seconds"), int) or not 1 <= request["timeout_seconds"] <= 3600:
+        raise ValueError("Approved timeout is invalid.")
+    if request.get("max_log_bytes") != _MAX_LOG_BYTES:
+        raise ValueError("Approved log limit is invalid.")
     approval_id = request.get("approval_id")
     if not isinstance(approval_id, str) or not re.fullmatch(r"[0-9a-f-]{36}", approval_id):
         raise ValueError("Approval ID is invalid.")
     consumed = root / "consumed"
     consumed.mkdir(mode=0o700, exist_ok=True)
-    if consumed.is_symlink() or stat.S_IMODE(consumed.stat().st_mode) & 0o077:
+    if consumed.is_symlink() or consumed.stat().st_uid != os.getuid() or stat.S_IMODE(consumed.stat().st_mode) & 0o077:
         raise ValueError("Approval replay ledger must have private permissions.")
     marker = consumed / approval_id
     try:
