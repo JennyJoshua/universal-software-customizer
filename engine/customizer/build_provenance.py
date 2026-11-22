@@ -19,7 +19,7 @@ from .build_evidence import (
     inspect_git_source,
     validate_build_evidence,
 )
-from .build_runner import _stage_source_snapshot
+from .build_runner import _EXPORT_HELPER_IMAGE, _stage_source_snapshot
 
 _SHA_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _MAX_EVIDENCE_BYTES = 8 * 1024 * 1024
@@ -324,8 +324,8 @@ def create_build_provenance_manifest(
         raise ValueError("Build evidence is missing provenance fields: " + ", ".join(missing_fields))
     if report["source_git_identity_error"] is not None:
         raise ValueError("Build evidence reports a source Git identity error.")
-    if not isinstance(report["export_helper_image"], str) or not re.search(r"@sha256:[0-9a-f]{64}$", report["export_helper_image"]):
-        raise ValueError("Build evidence does not identify a digest-pinned USC export-helper image.")
+    if report["export_helper_image"] != _EXPORT_HELPER_IMAGE:
+        raise ValueError("Build evidence does not identify the pinned USC export-helper image.")
     if not isinstance(report["export_helper_image_id"], str) or not report["export_helper_image_id"]:
         raise ValueError("Build evidence does not identify the local USC export-helper image ID.")
     if report["status"] == "passed" and report["output_volume_cleanup_confirmed"] is not True:
