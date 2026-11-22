@@ -550,7 +550,32 @@ def run_isolated_build(
             "errors": ["The digest-pinned image is not available locally; image pulling is disabled."],
         })
     docker_image_id = image_probe.stdout.strip()
-    run_label = f"com.usc.build-run={uuid.uuid4().hex}"
+    try:
+        exporter_image_probe = subprocess.run(
+            [docker, "image", "inspect", "--format", "{{.Id}}", _EXPORT_HELPER_IMAGE],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        exporter_image_probe = None
+    if exporter_image_probe is None or exporter_image_probe.returncode != 0 or not (exporter_image_probe.stdout or "").strip():
+        return _validated_result({
+            "operation": "isolated_build",
+            "status": "blocked_isolation_unavailable",
+            "executed": False,
+            "image": image,
+            "docker_image_id": docker_image_id,
+        "export_helper_image": _EXPORT_HELPER_IMAGE,
+        "export_helper_image_id": export_helper_image_id,
+            "export_helper_image": _EXPORT_HELPER_IMAGE,
+            "errors": ["The pinned USC export-helper image is not available locally; image pulling is disabled."],
+        })
+    export_helper_image_id = exporter_image_probe.stdout.strip()
+    run_id = uuid.uuid4().hex
+    run_label = f"com.usc.build-run={run_id}"
+    output_volume_name = f"usc-output-{run_id}"
+    output_volume_created = False
+    output_volume_cleanup_ok = True
+    export_helper_container_id = None
     toolchain_inventory = _probe_toolchain(docker, image, run_label)
     toolchain_inventory_sha256 = _toolchain_inventory_digest(toolchain_inventory)
 
@@ -592,6 +617,12 @@ def run_isolated_build(
             )
             if "," in str(staged_source):
                 raise ValueError("Temporary snapshot path must not contain commas.")
+            output_volume_created = _create_output_volume(docker, output_volume_name, run_id)
+            if not output_volume_created:
+                raise OSError("USC could not create the bounded 256 MB tmpfs output volume.")
+            export_helper_container_id = _start_export_helper(docker, output_volume_name, run_label)
+            if not export_helper_container_id:
+                raise OSError("USC could not start the restricted output-export helper container.")
             docker_argv = [
                 docker, "run", "--pull=never",
                 "--network=none", "--read-only",
@@ -599,7 +630,7 @@ def run_isolated_build(
                 "--security-opt=no-new-privileges:true",
                 "--pids-limit=64", "--memory=512m", "--cpus=1.0",
                 f"--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=64m,uid={os.getuid()},gid={os.getgid()},mode=0700",
-                f"--tmpfs=/out:rw,noexec,nosuid,nodev,size=256m,uid={os.getuid()},gid={os.getgid()},mode=0700",
+                f"--mount=type=volume,src={output_volume_name},dst=/out",
                 f"--label={run_label}",
                 f"--mount=type=bind,src={staged_source},dst=/src,readonly",
                 "--workdir=/src",
@@ -650,7 +681,7 @@ def run_isolated_build(
                         execution_started = False
                     else:
                         status = "passed" if exit_code == 0 else "failed"
-                        artifact_exported = _export_container_output(docker, run_label, output)
+                        artifact_exported = _export_container_output(docker, export_helper_container_id, output)
                         if artifact_exported:
                             try:
                                 artifact_inventory, artifact_inventory_sha256 = create_artifact_inventory(output)
@@ -698,10 +729,12 @@ def run_isolated_build(
         raise
     finally:
         cleanup_ok = _cleanup_labelled_containers(docker, run_label)
+        if output_volume_created:
+            output_volume_cleanup_ok = _cleanup_output_volume(docker, output_volume_name)
 
-    if not cleanup_ok:
+    if not cleanup_ok or not output_volume_cleanup_ok:
         status = "blocked_cleanup_failed"
-        errors.append("USC could not confirm cleanup of every container created for this build.")
+        errors.append("USC could not confirm cleanup of every build/export container and temporary output volume.")
     finished_at = datetime.now(timezone.utc).isoformat() if started_at else None
     duration_seconds = round(max(0.0, time.monotonic() - started_monotonic), 3) if started_monotonic is not None else None
     redacted_logs = redact_build_logs(logs.decode("utf-8", errors="replace"))
@@ -745,6 +778,7 @@ def run_isolated_build(
         "excluded_source_path_count": excluded_source_path_count,
         "network_disabled": True,
         "container_cleanup_confirmed": cleanup_ok,
+        "output_volume_cleanup_confirmed": output_volume_cleanup_ok,
         "errors": errors,
-        "note": "No host environment variables or credentials were forwarded. The image was not pulled; it had to be pre-provisioned locally. Log redaction is best-effort.",
+        "note": "No host environment variables or credentials were forwarded. The build and pinned USC export-helper images had to be pre-provisioned locally. The helper is non-root, network-disabled, read-only, and only holds the bounded output tmpfs volume read-only during export. Log redaction is best-effort.",
     })
