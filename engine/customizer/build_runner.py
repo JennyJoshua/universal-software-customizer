@@ -164,12 +164,42 @@ def _validated_result(report: dict) -> dict:
 
 def _directory(path: str | Path, label: str) -> Path:
     supplied = Path(path).expanduser()
-    if supplied.is_symlink():
-        raise ValueError(f"{label} must not be a symlink.")
+    absolute = supplied.absolute()
+    current = Path(absolute.anchor)
+    for part in absolute.parts[1:]:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError(f"{label} path must not traverse a symlink.")
     resolved = supplied.resolve(strict=True)
     if not resolved.is_dir():
         raise ValueError(f"{label} must be an existing directory.")
     return resolved
+
+
+def _directory_identity(path: Path) -> tuple[int, int] | None:
+    try:
+        if path.is_symlink():
+            return None
+        info = path.stat(follow_symlinks=False)
+    except OSError:
+        return None
+    if not stat.S_ISDIR(info.st_mode):
+        return None
+    return info.st_dev, info.st_ino
+
+
+def _output_directory_matches(
+    output: Path,
+    expected_identity: tuple[int, int],
+    *,
+    require_empty: bool,
+) -> bool:
+    if _directory_identity(output) != expected_identity:
+        return False
+    try:
+        return not require_empty or not any(output.iterdir())
+    except OSError:
+        return False
 
 
 def _validate_request(
@@ -423,8 +453,72 @@ def _start_export_helper(docker: str, volume_name: str, run_label: str) -> str |
         return None
 
 
-def _export_container_output(docker: str, exporter_container_id: str, output: Path) -> bool:
-    """Copy output while the restricted helper still holds the tmpfs volume mounted."""
+def _merge_staged_export(
+    staged: Path,
+    output: Path,
+    expected_identity: tuple[int, int],
+    staged_inventory: list[dict],
+) -> bool:
+    """Merge staged artifacts without overwriting files created concurrently."""
+    created_files: list[Path] = []
+    created_directories: list[Path] = []
+    try:
+        for root, directories, files in os.walk(staged, followlinks=False):
+            directories.sort()
+            files.sort()
+            relative_root = Path(root).relative_to(staged)
+            for name in directories:
+                source_directory = Path(root) / name
+                if source_directory.is_symlink():
+                    raise ValueError("Export staging contains a symlinked directory.")
+                target_directory = output / relative_root / name
+                if not _output_directory_matches(output, expected_identity, require_empty=False):
+                    raise ValueError("Output directory changed during artifact export.")
+                if target_directory.exists() or target_directory.is_symlink():
+                    raise FileExistsError("Output directory changed during artifact export.")
+                target_directory.mkdir(mode=0o700)
+                created_directories.append(target_directory)
+            for name in files:
+                source_file = Path(root) / name
+                metadata = source_file.stat(follow_symlinks=False)
+                if not stat.S_ISREG(metadata.st_mode) or source_file.is_symlink():
+                    raise ValueError("Export staging contains a symlink or non-regular file.")
+                target_file = output / relative_root / name
+                if not _output_directory_matches(output, expected_identity, require_empty=False):
+                    raise ValueError("Output directory changed during artifact export.")
+                if target_file.exists() or target_file.is_symlink():
+                    raise FileExistsError("Output file already exists; USC will not overwrite concurrent data.")
+                os.link(source_file, target_file, follow_symlinks=False)
+                created_files.append(target_file)
+
+        actual_inventory, _ = create_artifact_inventory(output)
+        if actual_inventory != staged_inventory:
+            raise ValueError("Exported artifact inventory changed during the output merge.")
+        return _output_directory_matches(output, expected_identity, require_empty=False)
+    except (OSError, ValueError):
+        if _directory_identity(output) == expected_identity:
+            for path in reversed(created_files):
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            for path in reversed(created_directories):
+                try:
+                    path.rmdir()
+                except OSError:
+                    pass
+        return False
+
+
+def _export_container_output(
+    docker: str,
+    exporter_container_id: str,
+    output: Path,
+    expected_output_identity: tuple[int, int],
+) -> bool:
+    """Copy to a private staging directory, then merge without overwriting concurrent files."""
+    if not _output_directory_matches(output, expected_output_identity, require_empty=True):
+        return False
     try:
         running = subprocess.run(
             [docker, "inspect", "--format", "{{.State.Running}}", exporter_container_id],
@@ -432,18 +526,19 @@ def _export_container_output(docker: str, exporter_container_id: str, output: Pa
         )
         if running.returncode != 0 or running.stdout.strip().lower() != "true":
             return False
-        copied = subprocess.run(
-            [docker, "cp", f"{exporter_container_id}:/out/.", str(output)],
-            capture_output=True, text=True, timeout=60, check=False,
-        )
-        if copied.returncode != 0:
-            return False
-        for root, directories, files in os.walk(output, followlinks=False):
-            for name in directories + files:
-                if (Path(root) / name).is_symlink():
-                    return False
-        return True
-    except (OSError, subprocess.TimeoutExpired):
+        with tempfile.TemporaryDirectory(prefix=".usc-export-", dir=output.parent) as temporary_root:
+            staged = Path(temporary_root)
+            copied = subprocess.run(
+                [docker, "cp", f"{exporter_container_id}:/out/.", str(staged)],
+                capture_output=True, text=True, timeout=60, check=False,
+            )
+            if copied.returncode != 0:
+                return False
+            staged_inventory, _ = create_artifact_inventory(staged)
+            if not _output_directory_matches(output, expected_output_identity, require_empty=True):
+                return False
+            return _merge_staged_export(staged, output, expected_output_identity, staged_inventory)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
         return False
 
 
