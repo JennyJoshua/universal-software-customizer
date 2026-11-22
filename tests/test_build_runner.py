@@ -13,6 +13,13 @@ from customizer.build_runner import _probe_toolchain, _stage_source_snapshot, _t
 IMAGE = "python:3.12-slim@sha256:" + "a" * 64
 
 
+@pytest.fixture(autouse=True)
+def _mock_bounded_export_volume(monkeypatch):
+    monkeypatch.setattr("customizer.build_runner._create_output_volume", lambda *args, **kwargs: True)
+    monkeypatch.setattr("customizer.build_runner._start_export_helper", lambda *args, **kwargs: "fixture-exporter")
+    monkeypatch.setattr("customizer.build_runner._cleanup_output_volume", lambda *args, **kwargs: True)
+
+
 def _paths(tmp_path: Path) -> tuple[Path, Path]:
     source = tmp_path / "source"
     output = tmp_path / "output"
@@ -134,11 +141,13 @@ def test_runner_uses_restricted_container_and_reports_success(tmp_path, monkeypa
             return subprocess.CompletedProcess(argv, 0, stdout="27.0", stderr="")
         if argv[1:3] == ["image", "inspect"]:
             return subprocess.CompletedProcess(argv, 0, stdout="sha256:" + "b" * 64, stderr="")
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(argv, 0, stdout="true", stderr="")
         if argv[1] == "cp":
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if argv[1:3] == ["ps", "-aq"]:
             ps_calls["count"] += 1
-            found = "fixture-container" if ps_calls["count"] < 3 else ""
+            found = "fixture-container" if ps_calls["count"] == 1 else ""
             return subprocess.CompletedProcess(argv, 0, stdout=found, stderr="")
         if argv[1:3] == ["rm", "-f"]:
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
@@ -160,7 +169,7 @@ def test_runner_uses_restricted_container_and_reports_success(tmp_path, monkeypa
     assert "--cap-drop=ALL" in argv
     assert "--security-opt=no-new-privileges:true" in argv
     assert "--pull=never" in argv
-    assert f"--tmpfs=/out:rw,noexec,nosuid,nodev,size=256m,uid={os.getuid()},gid={os.getgid()},mode=0700" in argv
+    assert any(item.startswith("--mount=type=volume,src=usc-output-") and item.endswith(",dst=/out") for item in argv)
     assert f"--mount=type=bind,src={captured['staged_root']},dst=/src,readonly" in argv
     assert Path(captured["staged_root"]) != source.resolve()
     assert "app/main.py" in captured["staged_files"]
@@ -175,6 +184,9 @@ def test_runner_uses_restricted_container_and_reports_success(tmp_path, monkeypa
     assert report["source_read_only"] is True
     assert report["network_disabled"] is True
     assert report["container_cleanup_confirmed"] is True
+    assert report["output_volume_cleanup_confirmed"] is True
+    assert report["export_helper_image"].startswith("busybox@sha256:")
+    assert report["export_helper_image_id"] == "sha256:" + "b" * 64
     assert report["artifact_exported"] is True
     assert report["docker_image_id"] == "sha256:" + "b" * 64
     assert report["command_sha256"] and len(report["command_sha256"]) == 64
@@ -227,6 +239,8 @@ def test_runner_marks_container_cleanup_failure_as_blocked(tmp_path, monkeypatch
             return subprocess.CompletedProcess(argv, 0, stdout="27.0", stderr="")
         if argv[1:3] == ["image", "inspect"]:
             return subprocess.CompletedProcess(argv, 0, stdout="sha256:" + "b" * 64, stderr="")
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(argv, 0, stdout="true", stderr="")
         if argv[1] == "cp":
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if argv[1:3] == ["ps", "-aq"]:
@@ -485,6 +499,8 @@ def test_runner_records_missing_command_and_nonzero_exit_without_source_mutation
             return subprocess.CompletedProcess(argv, 0, stdout="27.0", stderr="")
         if argv[1:3] == ["image", "inspect"]:
             return subprocess.CompletedProcess(argv, 0, stdout="sha256:" + "b" * 64, stderr="")
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(argv, 0, stdout="true", stderr="")
         if argv[1] == "cp":
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         if argv[1:3] == ["ps", "-aq"]:

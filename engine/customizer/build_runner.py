@@ -20,6 +20,7 @@ from .build_evidence import create_artifact_inventory, inspect_git_source, redac
 from .source_secret_scan import SourceSecretScanner
 
 _PINNED_IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
+_EXPORT_HELPER_IMAGE = "busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
 _SHELLS = {"sh", "bash", "dash", "zsh", "fish", "cmd", "powershell", "pwsh"}
 _MAX_TIMEOUT = 3600
 _MAX_LOG_BYTES = 1_048_576
@@ -382,13 +383,57 @@ def _labelled_container_ids(docker: str, label: str) -> list[str] | None:
         return None
 
 
-def _export_container_output(docker: str, label: str, output: Path) -> bool:
-    container_ids = _labelled_container_ids(docker, label)
-    if container_ids is None or len(container_ids) != 1:
-        return False
+def _create_output_volume(docker: str, volume_name: str, run_id: str) -> bool:
+    """Create a bounded Docker-managed tmpfs volume for build artifacts."""
     try:
+        created = subprocess.run(
+            [
+                docker, "volume", "create", "--driver", "local",
+                "--opt", "type=tmpfs", "--opt", "device=tmpfs",
+                "--opt", f"o=size=256m,uid={os.getuid()},gid={os.getgid()},mode=0700",
+                "--label", f"com.usc.build-volume={run_id}", volume_name,
+            ],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        return created.returncode == 0 and created.stdout.strip() == volume_name
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _start_export_helper(docker: str, volume_name: str, run_label: str) -> str | None:
+    """Keep the output tmpfs mounted read-only until the host has copied its contents."""
+    argv = [
+        docker, "run", "-d", "--pull=never", "--network=none", "--read-only",
+        f"--user={os.getuid()}:{os.getgid()}", "--cap-drop=ALL",
+        "--security-opt=no-new-privileges:true",
+        "--pids-limit=16", "--memory=64m", "--cpus=0.25",
+        f"--mount=type=volume,src={volume_name},dst=/out,readonly",
+        f"--label={run_label}", "--entrypoint=/bin/sleep",
+        _EXPORT_HELPER_IMAGE, "7200",
+    ]
+    try:
+        started = subprocess.run(
+            argv, capture_output=True, text=True, timeout=15, check=False,
+        )
+        if started.returncode != 0:
+            return None
+        container_id = started.stdout.strip()
+        return container_id or None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _export_container_output(docker: str, exporter_container_id: str, output: Path) -> bool:
+    """Copy output while the restricted helper still holds the tmpfs volume mounted."""
+    try:
+        running = subprocess.run(
+            [docker, "inspect", "--format", "{{.State.Running}}", exporter_container_id],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        if running.returncode != 0 or running.stdout.strip().lower() != "true":
+            return False
         copied = subprocess.run(
-            [docker, "cp", f"{container_ids[0]}:/out/.", str(output)],
+            [docker, "cp", f"{exporter_container_id}:/out/.", str(output)],
             capture_output=True, text=True, timeout=60, check=False,
         )
         if copied.returncode != 0:
@@ -398,6 +443,17 @@ def _export_container_output(docker: str, label: str, output: Path) -> bool:
                 if (Path(root) / name).is_symlink():
                     return False
         return True
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _cleanup_output_volume(docker: str, volume_name: str) -> bool:
+    try:
+        removed = subprocess.run(
+            [docker, "volume", "rm", "-f", volume_name],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        return removed.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -494,7 +550,30 @@ def run_isolated_build(
             "errors": ["The digest-pinned image is not available locally; image pulling is disabled."],
         })
     docker_image_id = image_probe.stdout.strip()
-    run_label = f"com.usc.build-run={uuid.uuid4().hex}"
+    try:
+        exporter_image_probe = subprocess.run(
+            [docker, "image", "inspect", "--format", "{{.Id}}", _EXPORT_HELPER_IMAGE],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        exporter_image_probe = None
+    if exporter_image_probe is None or exporter_image_probe.returncode != 0 or not (exporter_image_probe.stdout or "").strip():
+        return _validated_result({
+            "operation": "isolated_build",
+            "status": "blocked_isolation_unavailable",
+            "executed": False,
+            "image": image,
+            "docker_image_id": docker_image_id,
+            "export_helper_image": _EXPORT_HELPER_IMAGE,
+            "errors": ["The pinned USC export-helper image is not available locally; image pulling is disabled."],
+        })
+    export_helper_image_id = exporter_image_probe.stdout.strip()
+    run_id = uuid.uuid4().hex
+    run_label = f"com.usc.build-run={run_id}"
+    output_volume_name = f"usc-output-{run_id}"
+    output_volume_created = False
+    output_volume_cleanup_ok = True
+    export_helper_container_id = None
     toolchain_inventory = _probe_toolchain(docker, image, run_label)
     toolchain_inventory_sha256 = _toolchain_inventory_digest(toolchain_inventory)
 
@@ -536,6 +615,12 @@ def run_isolated_build(
             )
             if "," in str(staged_source):
                 raise ValueError("Temporary snapshot path must not contain commas.")
+            output_volume_created = _create_output_volume(docker, output_volume_name, run_id)
+            if not output_volume_created:
+                raise OSError("USC could not create the bounded 256 MB tmpfs output volume.")
+            export_helper_container_id = _start_export_helper(docker, output_volume_name, run_label)
+            if not export_helper_container_id:
+                raise OSError("USC could not start the restricted output-export helper container.")
             docker_argv = [
                 docker, "run", "--pull=never",
                 "--network=none", "--read-only",
@@ -543,7 +628,7 @@ def run_isolated_build(
                 "--security-opt=no-new-privileges:true",
                 "--pids-limit=64", "--memory=512m", "--cpus=1.0",
                 f"--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=64m,uid={os.getuid()},gid={os.getgid()},mode=0700",
-                f"--tmpfs=/out:rw,noexec,nosuid,nodev,size=256m,uid={os.getuid()},gid={os.getgid()},mode=0700",
+                f"--mount=type=volume,src={output_volume_name},dst=/out",
                 f"--label={run_label}",
                 f"--mount=type=bind,src={staged_source},dst=/src,readonly",
                 "--workdir=/src",
@@ -594,7 +679,7 @@ def run_isolated_build(
                         execution_started = False
                     else:
                         status = "passed" if exit_code == 0 else "failed"
-                        artifact_exported = _export_container_output(docker, run_label, output)
+                        artifact_exported = _export_container_output(docker, export_helper_container_id, output)
                         if artifact_exported:
                             try:
                                 artifact_inventory, artifact_inventory_sha256 = create_artifact_inventory(output)
@@ -642,10 +727,12 @@ def run_isolated_build(
         raise
     finally:
         cleanup_ok = _cleanup_labelled_containers(docker, run_label)
+        if output_volume_created:
+            output_volume_cleanup_ok = _cleanup_output_volume(docker, output_volume_name)
 
-    if not cleanup_ok:
+    if not cleanup_ok or not output_volume_cleanup_ok:
         status = "blocked_cleanup_failed"
-        errors.append("USC could not confirm cleanup of every container created for this build.")
+        errors.append("USC could not confirm cleanup of every build/export container and temporary output volume.")
     finished_at = datetime.now(timezone.utc).isoformat() if started_at else None
     duration_seconds = round(max(0.0, time.monotonic() - started_monotonic), 3) if started_monotonic is not None else None
     redacted_logs = redact_build_logs(logs.decode("utf-8", errors="replace"))
@@ -662,6 +749,8 @@ def run_isolated_build(
         "exit_code": exit_code,
         "image": image,
         "docker_image_id": docker_image_id,
+        "export_helper_image": _EXPORT_HELPER_IMAGE,
+        "export_helper_image_id": export_helper_image_id,
         "docker_engine_version": docker_engine_version,
         "toolchain_inventory": toolchain_inventory,
         "toolchain_inventory_sha256": toolchain_inventory_sha256,
@@ -689,6 +778,7 @@ def run_isolated_build(
         "excluded_source_path_count": excluded_source_path_count,
         "network_disabled": True,
         "container_cleanup_confirmed": cleanup_ok,
+        "output_volume_cleanup_confirmed": output_volume_cleanup_ok,
         "errors": errors,
-        "note": "No host environment variables or credentials were forwarded. The image was not pulled; it had to be pre-provisioned locally. Log redaction is best-effort.",
+        "note": "No host environment variables or credentials were forwarded. The build and pinned USC export-helper images had to be pre-provisioned locally. The helper is non-root, network-disabled, read-only, and only holds the bounded output tmpfs volume read-only during export. Log redaction is best-effort.",
     })
