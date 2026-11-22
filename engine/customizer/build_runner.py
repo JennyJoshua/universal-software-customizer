@@ -774,7 +774,7 @@ def run_isolated_build(
                         execution_started = False
                     else:
                         status = "passed" if exit_code == 0 else "failed"
-                        artifact_exported = _export_container_output(docker, export_helper_container_id, output)
+                        artifact_exported = _export_container_output(docker, export_helper_container_id, output, output_directory_identity)
                         if artifact_exported:
                             try:
                                 artifact_inventory, artifact_inventory_sha256 = create_artifact_inventory(output)
