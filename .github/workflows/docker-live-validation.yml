@@ -50,7 +50,7 @@ jobs:
             exit 1
           fi
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
-          if [[ ! "$EXPORTER_IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then echo "Could not resolve exporter image digest."; exit 1; fi
+          if [[ "$EXPORTER_IMAGE" != "busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662" ]]; then echo "Pinned USC exporter image digest does not match the pre-provisioned image."; exit 1; fi
           echo "exporter_image=$EXPORTER_IMAGE" >> "$GITHUB_OUTPUT"
 
       - name: Verify exporter container preserves bounded tmpfs data for copy
@@ -139,6 +139,10 @@ jobs:
           assert report["network_disabled"] is True
           assert report["container_cleanup_confirmed"] is True
           assert report["artifact_exported"] is True
+          assert report["output_volume_cleanup_confirmed"] is True
+          assert report["export_helper_image"] == "busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
+          assert report["export_helper_image_id"].startswith("sha256:")
+          assert report["artifact_inventory"] and report["artifact_inventory"][0]["path"] == "smoke-result.txt"
           assert report["source_git_commit_sha"]
           assert report["source_git_tree_sha"]
           assert report["toolchain_inventory_sha256"]
@@ -147,7 +151,11 @@ jobs:
           print("Live Docker validation passed:", report["docker_engine_version"])
           PY
           if [[ -n "$(docker ps -aq --filter 'label=com.usc.build-run')" ]]; then
-            echo "A labelled USC build container remains after the run."
+            echo "A labelled USC build/export container remains after the run."
+            exit 1
+          fi
+          if [[ -n "$(docker volume ls -q --filter 'label=com.usc.build-volume')" ]]; then
+            echo "A labelled USC output volume remains after the run."
             exit 1
           fi
           test -z "$(git -C "$FIXTURE" status --porcelain)"
