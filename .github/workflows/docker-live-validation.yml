@@ -86,9 +86,11 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
 
-          report = json.loads(Path("$RUNNER_TEMP/build-evidence.json").read_text())
+          temp = Path(os.environ["RUNNER_TEMP"])
+          report = json.loads((temp / "build-evidence.json").read_text())
           assert report["status"] == "passed", report
           assert report["executed"] is True
           assert report["source_read_only"] is True
@@ -98,7 +100,7 @@ jobs:
           assert report["source_git_commit_sha"]
           assert report["source_git_tree_sha"]
           assert report["toolchain_inventory_sha256"]
-          artifact = Path("$RUNNER_TEMP/usc-docker-artifacts/smoke-result.txt")
+          artifact = temp / "usc-docker-artifacts" / "smoke-result.txt"
           assert artifact.read_text() == "isolated runner passed\n"
           print("Live Docker validation passed:", report["docker_engine_version"])
           PY
