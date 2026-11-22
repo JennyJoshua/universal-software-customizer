@@ -177,3 +177,37 @@ def test_export_propagates_interrupt_during_copy_for_runner_cleanup(tmp_path, mo
             (output.stat().st_dev, output.stat().st_ino),
         )
     assert len(calls) == 2
+
+
+
+def test_output_volume_creation_fails_closed_when_docker_rejects_it(monkeypatch):
+    monkeypatch.setattr(
+        "customizer.build_runner.subprocess.run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 1, stdout="", stderr="volume driver failed"),
+    )
+    assert _create_output_volume("/usr/bin/docker", "usc-output-test", "abc123") is False
+
+
+def test_export_helper_startup_fails_closed_when_docker_rejects_it(monkeypatch):
+    monkeypatch.setattr(
+        "customizer.build_runner.subprocess.run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 125, stdout="", stderr="image unavailable"),
+    )
+    assert _start_export_helper("/usr/bin/docker", "usc-output-test", "com.usc.build-run=abc123") is None
+
+
+def test_export_copy_failure_returns_false_without_partial_host_output(tmp_path, monkeypatch):
+    output = tmp_path / "artifacts"
+    output.mkdir()
+
+    def fake_run(argv, **kwargs):
+        if argv[1] == "inspect":
+            return subprocess.CompletedProcess(argv, 0, stdout="true\n", stderr="")
+        if argv[1] == "cp":
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="copy interrupted")
+        raise AssertionError(argv)
+
+    monkeypatch.setattr("customizer.build_runner.subprocess.run", fake_run)
+    identity = (output.stat().st_dev, output.stat().st_ino)
+    assert _export_container_output("/usr/bin/docker", "export-helper", output, identity) is False
+    assert list(output.iterdir()) == []
