@@ -117,7 +117,7 @@ def test_export_refuses_output_directory_changed_during_build(tmp_path, monkeypa
 
     def fake_run(argv, **kwargs):
         calls.append(argv)
-        return subprocess.CompletedProcess(argv, 0, stdout="true\\n", stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout="true\n", stderr="")
 
     monkeypatch.setattr("customizer.build_runner.subprocess.run", fake_run)
     assert _export_container_output("/usr/bin/docker", "export-helper", output, identity) is False
@@ -133,7 +133,7 @@ def test_export_refuses_nonempty_output_directory_before_copy(tmp_path, monkeypa
 
     monkeypatch.setattr(
         "customizer.build_runner.subprocess.run",
-        lambda argv, **kwargs: calls.append(argv) or subprocess.CompletedProcess(argv, 0, stdout="true\\n", stderr=""),
+        lambda argv, **kwargs: calls.append(argv) or subprocess.CompletedProcess(argv, 0, stdout="true\n", stderr=""),
     )
     assert _export_container_output("/usr/bin/docker", "export-helper", output, identity) is False
     assert calls == []
@@ -146,7 +146,7 @@ def test_export_rechecks_output_after_docker_copy(tmp_path, monkeypatch):
 
     def fake_run(argv, **kwargs):
         if argv[1] == "inspect":
-            return subprocess.CompletedProcess(argv, 0, stdout="true\\n", stderr="")
+            return subprocess.CompletedProcess(argv, 0, stdout="true\n", stderr="")
         if argv[1] == "cp":
             (output / "concurrent.txt").write_text("concurrent", encoding="utf-8")
             return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
@@ -165,7 +165,7 @@ def test_export_propagates_interrupt_during_copy_for_runner_cleanup(tmp_path, mo
     def fake_run(argv, **kwargs):
         calls.append(argv)
         if argv[1] == "inspect":
-            return subprocess.CompletedProcess(argv, 0, stdout="true\\n", stderr="")
+            return subprocess.CompletedProcess(argv, 0, stdout="true\n", stderr="")
         if argv[1] == "cp":
             raise KeyboardInterrupt()
         raise AssertionError(argv)
