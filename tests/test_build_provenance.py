@@ -61,6 +61,9 @@ def _manifest():
             "command_sha256": digest,
             "image": "python:3.12-slim@sha256:" + digest,
             "docker_image_id": "sha256:" + digest,
+            "export_helper_image": "busybox@sha256:" + "d" * 64,
+            "export_helper_image_id": "sha256:" + "e" * 64,
+            "output_volume_cleanup_confirmed": True,
             "source_snapshot_sha256": digest,
             "artifact_inventory_sha256": digest,
             "docker_engine_version": "27.0",
@@ -201,6 +204,9 @@ def _write_evidence(root: Path, evidence_root: Path, artifacts_root: Path) -> tu
         "exit_code": 0,
         "image": "python:3.12-slim@sha256:" + "a" * 64,
         "docker_image_id": "sha256:" + "b" * 64,
+        "export_helper_image": "busybox@sha256:" + "d" * 64,
+        "export_helper_image_id": "sha256:" + "e" * 64,
+        "output_volume_cleanup_confirmed": True,
         "docker_engine_version": "27.0",
         "command_argv": ["python", "-m", "pytest"],
         "command_sha256": "c" * 64,
@@ -256,6 +262,9 @@ def test_create_manifest_reverifies_evidence_source_and_artifacts(tmp_path):
     assert manifest["source"]["tree_sha"] == report["source_git_tree_sha"]
     assert manifest["build"]["evidence_sha256"] == hashlib.sha256(raw_evidence).hexdigest()
     assert manifest["build"]["source_snapshot_sha256"] == report["source_snapshot_sha256"]
+    assert manifest["build"]["export_helper_image"] == report["export_helper_image"]
+    assert manifest["build"]["export_helper_image_id"] == report["export_helper_image_id"]
+    assert manifest["build"]["output_volume_cleanup_confirmed"] is True
     assert manifest["artifacts"][0]["path"] == "artifacts/app.zip"
     assert manifest["customization"]["project_id"] == "fixture-project"
     assert manifest["customization"]["registry_sha256"]
