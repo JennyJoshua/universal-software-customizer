@@ -202,8 +202,8 @@ def test_cli_build_run_consumes_receipt_and_calls_only_approved_profile(tmp_path
     _git_source(source)
     request_path, _ = _request(tmp_path, source)
     receipt_path = tmp_path / "receipt.json"
-    approve_build_request(request_path, approved=True)
-    receipt_path.write_text(json.dumps(approve_build_request(request_path, approved=True)), encoding="utf-8")
+    receipt = approve_build_request(request_path, approved=True)
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
     output = tmp_path / "artifacts"
     output.mkdir()
     captured = {}
