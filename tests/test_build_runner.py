@@ -738,3 +738,40 @@ def test_toolchain_probe_times_out_and_kills_unresponsive_probe(tmp_path, monkey
     assert inventory[0]["status"] == "timed_out"
     assert inventory[0]["exit_code"] == -9
     assert killed["value"] is True
+
+
+
+def test_runner_blocks_before_execution_when_export_helper_cannot_start(tmp_path, monkeypatch):
+    source, output = _paths(tmp_path)
+    (source / "app.py").write_text("print('synthetic')\\n", encoding="utf-8")
+    monkeypatch.setattr("customizer.build_runner.shutil.which", lambda _name: "/usr/bin/docker")
+    monkeypatch.setattr("customizer.build_runner._probe_toolchain", lambda *args, **kwargs: [])
+    def fake_run(argv, **kwargs):
+        if argv[1:2] == ["info"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="29.4.2", stderr="")
+        if argv[1:3] == ["image", "inspect"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="sha256:" + "b" * 64, stderr="")
+        if Path(argv[0]).name == "git":
+            return subprocess.CompletedProcess(argv, 128, stdout="", stderr="not a git repository")
+        raise AssertionError(argv)
+
+    monkeypatch.setattr("customizer.build_runner.subprocess.run", fake_run)
+    monkeypatch.setattr("customizer.build_runner._create_output_volume", lambda *args, **kwargs: True)
+    monkeypatch.setattr("customizer.build_runner._start_export_helper", lambda *args, **kwargs: None)
+    monkeypatch.setattr("customizer.build_runner._cleanup_labelled_containers", lambda *args, **kwargs: True)
+    monkeypatch.setattr("customizer.build_runner._cleanup_output_volume", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        "customizer.build_runner.subprocess.Popen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Build container must not start.")),
+    )
+
+    report = run_isolated_build(
+        source, output, image=IMAGE, command=["python", "-c", "print('synthetic')"],
+        approved=True, timeout_seconds=60,
+    )
+
+    assert report["status"] == "blocked_isolation_unavailable"
+    assert report["executed"] is False
+    assert report["container_cleanup_confirmed"] is True
+    assert report["output_volume_cleanup_confirmed"] is True
+    assert list(output.iterdir()) == []
