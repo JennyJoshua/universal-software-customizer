@@ -220,7 +220,12 @@ def main(argv: list[str] | None = None) -> int:
             if output_dir == source_root or source_root in output_dir.parents or output_dir in source_root.parents:
                 raise ValueError("Build artifact directory must be separate from the source directory.")
             if args.report:
-                report_path = Path(args.report).expanduser().resolve()
+                supplied_report = Path(args.report).expanduser()
+                if supplied_report.is_symlink():
+                    raise ValueError("Build evidence report must not be a symlink.")
+                report_path = supplied_report.resolve()
+                if report_path == source_root or source_root in report_path.parents:
+                    raise ValueError("Build evidence report must be outside the source directory.")
                 if report_path == output_dir or output_dir in report_path.parents:
                     raise ValueError("Build evidence report must be outside the artifact directory.")
             approved = consume_build_approval(
