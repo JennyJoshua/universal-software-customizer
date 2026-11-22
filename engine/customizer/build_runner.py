@@ -597,6 +597,9 @@ def run_isolated_build(
         source, output, args = _validate_request(
             source_path, output_path, image, command, timeout_seconds, max_log_bytes,
         )
+        output_directory_identity = _directory_identity(output)
+        if output_directory_identity is None:
+            raise ValueError("Output directory identity could not be established safely.")
     except (OSError, ValueError) as exc:
         return _validated_result({
             "operation": "isolated_build",
