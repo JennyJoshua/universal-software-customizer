@@ -15,7 +15,7 @@ from customizer.build_provenance import (
     create_build_provenance_manifest,
     validate_build_provenance,
 )
-from customizer.build_runner import _stage_source_snapshot
+from customizer.build_runner import _EXPORT_HELPER_IMAGE, _stage_source_snapshot
 
 
 SCHEMA_PATH = (
@@ -61,6 +61,9 @@ def _manifest():
             "command_sha256": digest,
             "image": "python:3.12-slim@sha256:" + digest,
             "docker_image_id": "sha256:" + digest,
+            "export_helper_image": _EXPORT_HELPER_IMAGE,
+            "export_helper_image_id": "sha256:" + "e" * 64,
+            "output_volume_cleanup_confirmed": True,
             "source_snapshot_sha256": digest,
             "artifact_inventory_sha256": digest,
             "docker_engine_version": "27.0",
@@ -201,6 +204,9 @@ def _write_evidence(root: Path, evidence_root: Path, artifacts_root: Path) -> tu
         "exit_code": 0,
         "image": "python:3.12-slim@sha256:" + "a" * 64,
         "docker_image_id": "sha256:" + "b" * 64,
+        "export_helper_image": _EXPORT_HELPER_IMAGE,
+        "export_helper_image_id": "sha256:" + "e" * 64,
+        "output_volume_cleanup_confirmed": True,
         "docker_engine_version": "27.0",
         "command_argv": ["python", "-m", "pytest"],
         "command_sha256": "c" * 64,
@@ -256,6 +262,9 @@ def test_create_manifest_reverifies_evidence_source_and_artifacts(tmp_path):
     assert manifest["source"]["tree_sha"] == report["source_git_tree_sha"]
     assert manifest["build"]["evidence_sha256"] == hashlib.sha256(raw_evidence).hexdigest()
     assert manifest["build"]["source_snapshot_sha256"] == report["source_snapshot_sha256"]
+    assert manifest["build"]["export_helper_image"] == report["export_helper_image"]
+    assert manifest["build"]["export_helper_image_id"] == report["export_helper_image_id"]
+    assert manifest["build"]["output_volume_cleanup_confirmed"] is True
     assert manifest["artifacts"][0]["path"] == "artifacts/app.zip"
     assert manifest["customization"]["project_id"] == "fixture-project"
     assert manifest["customization"]["registry_sha256"]
@@ -345,3 +354,56 @@ def test_upstream_context_rejects_mismatched_baseline_and_provenance(tmp_path):
 
     with pytest.raises(ValueError, match="target SHA does not match"):
         _upstream_context(source, identity["_tracked_blob_sha_by_path"])
+
+
+
+def test_create_manifest_rejects_passed_evidence_without_exporter_identity(tmp_path):
+    source = tmp_path / "source"
+    _make_source(source)
+    evidence_root = tmp_path / "evidence"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "app.zip").write_bytes(b"synthetic build artifact")
+    _write_evidence(source, evidence_root, artifacts)
+    report_path = evidence_root / "build-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report.pop("export_helper_image")
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="missing provenance fields"):
+        create_build_provenance_manifest(source, evidence_root, "build-report.json", artifacts)
+
+
+def test_create_manifest_rejects_passed_evidence_without_volume_cleanup(tmp_path):
+    source = tmp_path / "source"
+    _make_source(source)
+    evidence_root = tmp_path / "evidence"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "app.zip").write_bytes(b"synthetic build artifact")
+    _write_evidence(source, evidence_root, artifacts)
+    report_path = evidence_root / "build-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["output_volume_cleanup_confirmed"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must confirm cleanup"):
+        create_build_provenance_manifest(source, evidence_root, "build-report.json", artifacts)
+
+
+
+def test_create_manifest_rejects_unapproved_export_helper_image(tmp_path):
+    source = tmp_path / "source"
+    _make_source(source)
+    evidence_root = tmp_path / "evidence"
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "app.zip").write_bytes(b"synthetic build artifact")
+    _write_evidence(source, evidence_root, artifacts)
+    report_path = evidence_root / "build-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["export_helper_image"] = "busybox@sha256:" + "f" * 64
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="pinned USC export-helper image"):
+        create_build_provenance_manifest(source, evidence_root, "build-report.json", artifacts)
