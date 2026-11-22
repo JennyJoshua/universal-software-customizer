@@ -36,19 +36,19 @@ The user-facing CLI now separates request creation, explicit review/approval, an
 Example request creation (replace the image placeholder with a locally provisioned, verified digest):
 
 ~~~sh
-usc build-request --path ./candidate \\
-  --image python:3.12-slim@sha256:<verified-64-character-digest> \\
-  --profile python-pytest --timeout 300 --expires-in 900 \\
+usc build-request --path ./candidate \
+  --image python:3.12-slim@sha256:<verified-64-character-digest> \
+  --profile python-pytest --timeout 300 --expires-in 900 \
   --output ./build-request.json
 ~~~
 
 Approval and execution:
 
 ~~~sh
-usc build-approve --request ./build-request.json \\
+usc build-approve --request ./build-request.json \
   --output ./build-approval.json --approve
 
-usc build-run --approval ./build-approval.json --path ./candidate \\
+usc build-run --approval ./build-approval.json --path ./candidate \
   --output-dir ./build-artifacts --report ./build-evidence.json
 ~~~
 
@@ -74,6 +74,6 @@ Do not pass secrets in command arguments or source files. A mounted source tree 
 
 ## Current limitations
 
-This remains an initial local Docker runner, not a complete CI orchestration or release system. It stages a bounded source snapshot with known-path exclusions plus content checks for selected high-confidence credential formats; neither control is a complete secret scanner. The USC SHA-256 snapshot fingerprint is bound to the inspected Git commit/tree identity when a clean Git source is available. Build evidence includes a bounded inventory of selected tools in the pinned image, artifact hashes, and a detached provenance manifest that cross-checks the source and exported artifacts. The manifest is a consistency record, not a digital signature or proof of a trusted evidence producer. A reviewed user-facing CLI approval workflow and live Docker daemon validation remain outstanding. Use synthetic fixtures only until those controls and failure tests are complete.
+This remains an initial local Docker runner, not a complete CI orchestration or release system. It stages a bounded source snapshot with known-path exclusions plus content checks for selected high-confidence credential formats; neither control is a complete secret scanner. The USC SHA-256 snapshot fingerprint is bound to the inspected Git commit/tree identity when a clean Git source is available. Build evidence includes a bounded inventory of selected tools in the pinned image, artifact hashes, and a detached provenance manifest that cross-checks the source and exported artifacts. The manifest is a consistency record, not a digital signature or proof of a trusted evidence producer. The reviewed CLI approval workflow is now implemented for one fixed profile; live Docker daemon validation remains outstanding. Use synthetic fixtures only until that validation and remaining failure tests are complete.
 
 The runner is not a guarantee against container-runtime vulnerabilities or malicious build code. The snapshot fingerprint is a USC content digest, not itself a Git tree SHA or a signed provenance attestation; the detached manifest provides consistency checks but is not cryptographic proof of a trusted evidence producer. Use a patched Docker daemon and trusted, digest-pinned images. Never expose Docker socket or credentials inside the build container.
