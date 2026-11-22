@@ -56,6 +56,15 @@ Receipts use an HMAC key stored under the current user's `~/.usc` directory (dir
 
 The `python-container-smoke` profile exists only to validate the runner against a synthetic fixture in the trusted-main Docker validation workflow; it is not intended for customer project testing. Additional profiles require a separate reviewed change and tests. The user-facing workflow requires a clean Git source and refuses non-Git or dirty directories. Keep using synthetic fixtures only; this CLI work does not enable customer repositories.
 
+Before the first build, provision the USC export-helper image locally:
+
+~~~sh
+docker pull busybox:1.36.1
+docker image inspect busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662 --format '{{.Id}}'
+~~~
+
+The second command must resolve successfully. USC never pulls the helper image during a build and blocks execution if this exact digest is unavailable.
+
 ## Low-level Python API boundary
 
 The Python function `customizer.build_runner.run_isolated_build` is a low-level internal interface. Its `approved=True` argument is not a substitute for the reviewed CLI receipt workflow and can bypass that workflow when called directly by application code. Normal build requests must use `usc build-request`, `usc build-approve`, and `usc build-run` as described above. Do not expose the low-level function directly to untrusted callers.
