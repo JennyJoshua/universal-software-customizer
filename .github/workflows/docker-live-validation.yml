@@ -42,22 +42,27 @@ jobs:
         run: |
           docker info
           docker pull python:3.12-slim
+          docker pull busybox:1.36.1
           IMAGE="$(docker image inspect python:3.12-slim --format '{{index .RepoDigests 0}}')"
+          EXPORTER_IMAGE="$(docker image inspect busybox:1.36.1 --format '{{index .RepoDigests 0}}')"
           if [[ ! "$IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then
             echo "Could not resolve the pulled test image to a sha256 digest."
             exit 1
           fi
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          if [[ ! "$EXPORTER_IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then echo "Could not resolve exporter image digest."; exit 1; fi
+          echo "exporter_image=$EXPORTER_IMAGE" >> "$GITHUB_OUTPUT"
 
-      - name: Verify bounded tmpfs volume survives container exit for safe export
+      - name: Verify exporter container preserves bounded tmpfs data for copy
         env:
           USC_TEST_IMAGE: ${{ steps.image.outputs.image }}
+          USC_EXPORTER_IMAGE: ${{ steps.image.outputs.exporter_image }}
         run: |
           VOLUME="usc-volume-probe-${GITHUB_RUN_ID}"
-          CONTAINER="usc-volume-probe-${GITHUB_RUN_ID}"
+          EXPORTER="usc-volume-exporter-${GITHUB_RUN_ID}"
           OUTPUT="$RUNNER_TEMP/usc-volume-probe"
           cleanup() {
-            docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+            docker rm -f "$EXPORTER" >/dev/null 2>&1 || true
             docker volume rm -f "$VOLUME" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
@@ -66,15 +71,22 @@ jobs:
             --opt type=tmpfs --opt device=tmpfs \
             --opt "o=size=16m,uid=$(id -u),gid=$(id -g),mode=0700" \
             --label com.usc.test=volume-export "$VOLUME"
-          docker create --name "$CONTAINER" \
-            --user="$(id -u):$(id -g)" \
+          docker run -d --name "$EXPORTER" --pull=never \
+            --network=none --read-only --user="$(id -u):$(id -g)" \
+            --cap-drop=ALL --security-opt=no-new-privileges:true \
+            --pids-limit=16 --memory=64m --cpus=0.25 \
+            --mount "type=volume,src=$VOLUME,dst=/out,readonly" \
+            --entrypoint=/bin/sleep "$USC_EXPORTER_IMAGE" 7200
+          docker run --rm --pull=never --network=none --read-only \
+            --user="$(id -u):$(id -g)" --cap-drop=ALL \
+            --security-opt=no-new-privileges:true --pids-limit=16 \
+            --memory=128m --cpus=0.25 \
             --mount "type=volume,src=$VOLUME,dst=/out" \
-            --entrypoint python "$USC_TEST_IMAGE" \
-            -c "from pathlib import Path; Path('/out/probe.txt').write_text('tmpfs volume survived stop\n')"
-          docker start -a "$CONTAINER"
-          docker cp "$CONTAINER:/out/." "$OUTPUT"
-          test "$(cat "$OUTPUT/probe.txt")" = "tmpfs volume survived stop"
-          echo "Named tmpfs volume data remains exportable after container exit."
+            --entrypoint=python "$USC_TEST_IMAGE" \
+            -c "from pathlib import Path; Path('/out/probe.txt').write_text('export helper preserved tmpfs\\n')"
+          docker cp "$EXPORTER:/out/." "$OUTPUT"
+          test "$(cat "$OUTPUT/probe.txt")" = "export helper preserved tmpfs"
+          echo "Restricted exporter kept the tmpfs volume mounted and exported its contents."
 
       - name: Create a clean synthetic Git fixture
         run: |
