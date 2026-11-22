@@ -274,6 +274,14 @@ def consume_build_approval(
     consumed.mkdir(mode=0o700, exist_ok=True)
     if consumed.is_symlink() or consumed.stat().st_uid != os.getuid() or stat.S_IMODE(consumed.stat().st_mode) & 0o077:
         raise ValueError("Approval replay ledger must have private permissions.")
+    output = Path(output_path).expanduser()
+    if output.is_symlink():
+        raise ValueError("Build output directory must not be a symlink.")
+    output = output.resolve(strict=True)
+    if not output.is_dir():
+        raise ValueError("Build output path must be an existing directory.")
+    if any(output.iterdir()):
+        raise ValueError("Build output directory must be empty before approval is consumed.")
     marker = consumed / approval_id
     try:
         descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -281,12 +289,6 @@ def consume_build_approval(
         raise ValueError("Build approval has already been used; replay is blocked.") from exc
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
         stream.write(current.isoformat())
-    output = Path(output_path).expanduser()
-    if output.is_symlink():
-        raise ValueError("Build output directory must not be a symlink.")
-    output = output.resolve(strict=True)
-    if not output.is_dir():
-        raise ValueError("Build output path must be an existing directory.")
     return {
         "source_path": str(source),
         "output_path": str(output),
