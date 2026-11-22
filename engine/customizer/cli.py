@@ -17,6 +17,8 @@ from .verification import create_sync_verification
 from .verification_snapshot import create_sync_verification_snapshot
 from .acceptance import accept_sync_candidate, recover_sync_acceptance
 from .candidate_discard import discard_sync_candidate
+from .build_approval import create_build_approval_request, approve_build_request, consume_build_approval, available_build_profiles
+from .build_runner import run_isolated_build
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -140,13 +142,35 @@ def build_parser() -> argparse.ArgumentParser:
     discard_parser.add_argument("--approve", action="store_true", help="Explicitly approve removal of the validated candidate workspace.")
     discard_parser.add_argument("--output", help="Write discard report outside both repositories.")
 
+    build_request = subparsers.add_parser("build-request", help="Create a short-lived request for one allowlisted isolated-build profile; does not execute code.")
+    build_request.add_argument("--path", required=True, help="Clean Git source directory to bind to this request.")
+    build_request.add_argument("--image", required=True, help="Pre-provisioned image pinned by a full sha256 digest.")
+    build_request.add_argument("--profile", required=True, choices=sorted(available_build_profiles()), help="Fixed allowlisted command profile.")
+    build_request.add_argument("--timeout", type=int, default=300, help="Maximum build duration in seconds (1-3600).")
+    build_request.add_argument("--expires-in", type=int, default=900, help="Request lifetime in seconds (60-1800).")
+    build_request.add_argument("--output", required=True, help="Write approval request JSON outside the source directory.")
+
+    build_approve = subparsers.add_parser("build-approve", help="Approve the exact contents of a build request and create a local authenticated receipt.")
+    build_approve.add_argument("--request", required=True, help="Request JSON emitted by build-request.")
+    build_approve.add_argument("--output", required=True, help="Write receipt JSON outside the source directory.")
+    build_approve.add_argument("--approve", action="store_true", help="Explicitly approve this exact source revision, image digest, profile, and time limit.")
+
+    build_run = subparsers.add_parser("build-run", help="Consume a one-time approval receipt and run its fixed profile in Docker.")
+    build_run.add_argument("--approval", required=True, help="Authenticated one-time approval receipt.")
+    build_run.add_argument("--path", required=True, help="Source directory matching the approved Git revision.")
+    build_run.add_argument("--output-dir", required=True, help="Existing empty artifact directory outside the source.")
+    build_run.add_argument("--report", help="Write build evidence JSON outside source and artifact directories.")
+
     return parser
 
 
 def _write_report(report: dict, output: str | None, source_root: Path | None = None) -> None:
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if output:
-        output_path = Path(output).expanduser().resolve()
+        supplied_output = Path(output).expanduser()
+        if supplied_output.is_symlink():
+            raise ValueError("Report output must not be a symlink.")
+        output_path = supplied_output.resolve()
         if source_root is not None and (output_path == source_root or source_root in output_path.parents):
             raise ValueError("Report output must be outside the inspected source directory.")
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,7 +183,64 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "inspect":
+        if args.command == "build-request":
+            report = create_build_approval_request(
+                args.path, image=args.image, profile=args.profile,
+                timeout_seconds=args.timeout, expires_in_seconds=args.expires_in,
+            )
+            _write_report(report, args.output, Path(report["source_path"]))
+        elif args.command == "build-approve":
+            request_path = Path(args.request).expanduser()
+            if request_path.is_symlink():
+                raise ValueError("Build request file must not be a symlink.")
+            request_data = json.loads(request_path.read_text(encoding="utf-8"))
+            source_root = Path(request_data["source_path"]).expanduser().resolve(strict=True)
+            print(
+                "USC build approval review:\n"
+                f"  Source: {source_root}\n"
+                f"  Commit: {request_data.get('source_git_commit_sha')}\n"
+                f"  Tree: {request_data.get('source_git_tree_sha')}\n"
+                f"  Image: {request_data.get('image')}\n"
+                f"  Profile: {request_data.get('profile')}\n"
+                f"  Command: {request_data.get('command_argv')}\n"
+                f"  Timeout: {request_data.get('timeout_seconds')} seconds\n"
+                f"  Expires: {request_data.get('expires_at')}\n"
+                "  Release/deployment: NOT authorized",
+                file=sys.stderr,
+            )
+            receipt = approve_build_request(args.request, approved=args.approve)
+            _write_report(receipt, args.output, source_root)
+        elif args.command == "build-run":
+            supplied_source = Path(args.path).expanduser()
+            supplied_output = Path(args.output_dir).expanduser()
+            if supplied_source.is_symlink() or supplied_output.is_symlink():
+                raise ValueError("Build source and artifact directories must not be symlinks.")
+            source_root = supplied_source.resolve(strict=True)
+            output_dir = supplied_output.resolve(strict=True)
+            if output_dir == source_root or source_root in output_dir.parents or output_dir in source_root.parents:
+                raise ValueError("Build artifact directory must be separate from the source directory.")
+            if args.report:
+                supplied_report = Path(args.report).expanduser()
+                if supplied_report.is_symlink():
+                    raise ValueError("Build evidence report must not be a symlink.")
+                report_path = supplied_report.resolve()
+                if report_path == source_root or source_root in report_path.parents:
+                    raise ValueError("Build evidence report must be outside the source directory.")
+                if report_path == output_dir or output_dir in report_path.parents:
+                    raise ValueError("Build evidence report must be outside the artifact directory.")
+            approved = consume_build_approval(
+                args.approval, source_path=supplied_source, output_path=supplied_output,
+            )
+            report = run_isolated_build(
+                approved["source_path"], approved["output_path"],
+                image=approved["image"], command=approved["command"],
+                approved=True, timeout_seconds=approved["timeout_seconds"],
+                max_log_bytes=approved["max_log_bytes"],
+            )
+            _write_report(report, args.report, source_root)
+            if report.get("status") != "passed":
+                return 2
+        elif args.command == "inspect":
             if args.repo_url:
                 if not args.revision:
                     parser.error("--revision is required when using --repo-url.")

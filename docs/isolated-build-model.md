@@ -25,24 +25,40 @@ The source snapshot rejects symlinks and non-regular files, fails on incomplete 
 
 The host output directory must exist, be empty, be writable by the non-root runner, and be separate from (not an ancestor or descendant of) the source directory. Build code writes only to the size-limited container tmpfs; USC copies the output back after execution. Exported symlinks are rejected. This avoids exposing an unbounded host directory as a writable container mount.
 
-## Invocation contract
+## Reviewed CLI approval workflow
 
-The Python API is customizer.build_runner.run_isolated_build. It accepts a source directory, an existing output directory, a digest-pinned image, an argv list, and approved=True. The caller must obtain that approval through a separate human-reviewed workflow; the boolean is not a substitute for a user-facing approval gate.
+The user-facing CLI now separates request creation, explicit review/approval, and execution. The first allowlisted profile is `python-pytest`, which maps to the fixed argv `python -m pytest -q`; callers cannot supply arbitrary commands or shell strings through this workflow.
 
-Example (illustrative only; replace the placeholder with a verified, locally provisioned 64-character digest):
+1. Create a request from a clean Git working tree. The request binds the canonical source path, exact Git commit and tree, digest-pinned image, fixed profile/argv, timeout, log limit, unique approval ID, and expiry (60–1800 seconds; default 900 seconds). Request creation does not execute project code.
+2. Review the request JSON, then run `usc build-approve --request build-request.json --output build-approval.json --approve`. The CLI prints the exact source revision, image, profile, argv, timeout, expiry, and explicit no-release status before creating a receipt.
+3. Run `usc build-run --approval build-approval.json --path ./candidate --output-dir ./build-artifacts --report ./build-evidence.json`. USC authenticates and atomically consumes the receipt before invoking the Docker runner. A receipt cannot be reused; create a new request and approval if an attempt must be repeated.
 
-~~~python
-from customizer.build_runner import run_isolated_build
+Example request creation (replace the image placeholder with a locally provisioned, verified digest):
 
-report = run_isolated_build(
-    "./candidate",
-    "./build-output",
-    image="python:3.12-slim@sha256:<verified-64-character-digest>",
-    command=["python", "-m", "pytest", "-q"],
-    approved=True,
-    timeout_seconds=300,
-)
+~~~sh
+usc build-request --path ./candidate \
+  --image python:3.12-slim@sha256:<verified-64-character-digest> \
+  --profile python-pytest --timeout 300 --expires-in 900 \
+  --output ./build-request.json
 ~~~
+
+Approval and execution:
+
+~~~sh
+usc build-approve --request ./build-request.json \
+  --output ./build-approval.json --approve
+
+usc build-run --approval ./build-approval.json --path ./candidate \
+  --output-dir ./build-artifacts --report ./build-evidence.json
+~~~
+
+Receipts use an HMAC key stored under the current user's `~/.usc` directory (directory mode 0700; key mode 0600) and a private one-time-use ledger. This detects accidental/tampered receipt edits and blocks replay in the local state store. It is not a digital signature, cannot prove external human identity, and cannot resist a malicious process running as the same OS user who can alter the key or ledger. It is a local approval guardrail, not a remote authorization service.
+
+The current allowlist intentionally contains only `python-pytest`. Additional profiles require a separate reviewed change and tests. The user-facing workflow requires a clean Git source and refuses non-Git or dirty directories. Keep using synthetic fixtures only; this CLI work does not enable customer repositories.
+
+## Low-level Python API boundary
+
+The Python function `customizer.build_runner.run_isolated_build` is a low-level internal interface. Its `approved=True` argument is not a substitute for the reviewed CLI receipt workflow and can bypass that workflow when called directly by application code. Normal build requests must use `usc build-request`, `usc build-approve`, and `usc build-run` as described above. Do not expose the low-level function directly to untrusted callers.
 
 Do not pass secrets in command arguments or source files. A mounted source tree is readable to the build process; the runner does not make arbitrary source contents confidential. The output tmpfs is limited to 256 MB and the temporary filesystem to 64 MB. Keep secrets out of fixture and candidate trees.
 
@@ -58,6 +74,6 @@ Do not pass secrets in command arguments or source files. A mounted source tree 
 
 ## Current limitations
 
-This remains an initial local Docker runner, not a complete CI orchestration or release system. It stages a bounded source snapshot with known-path exclusions plus content checks for selected high-confidence credential formats; neither control is a complete secret scanner. The USC SHA-256 snapshot fingerprint is bound to the inspected Git commit/tree identity when a clean Git source is available. Build evidence includes a bounded inventory of selected tools in the pinned image, artifact hashes, and a detached provenance manifest that cross-checks the source and exported artifacts. The manifest is a consistency record, not a digital signature or proof of a trusted evidence producer. A reviewed user-facing CLI approval workflow and live Docker daemon validation remain outstanding. Use synthetic fixtures only until those controls and failure tests are complete.
+This remains an initial local Docker runner, not a complete CI orchestration or release system. It stages a bounded source snapshot with known-path exclusions plus content checks for selected high-confidence credential formats; neither control is a complete secret scanner. The USC SHA-256 snapshot fingerprint is bound to the inspected Git commit/tree identity when a clean Git source is available. Build evidence includes a bounded inventory of selected tools in the pinned image, artifact hashes, and a detached provenance manifest that cross-checks the source and exported artifacts. The manifest is a consistency record, not a digital signature or proof of a trusted evidence producer. The reviewed CLI approval workflow is now implemented for one fixed profile; live Docker daemon validation remains outstanding. Use synthetic fixtures only until that validation and remaining failure tests are complete.
 
 The runner is not a guarantee against container-runtime vulnerabilities or malicious build code. The snapshot fingerprint is a USC content digest, not itself a Git tree SHA or a signed provenance attestation; the detached manifest provides consistency checks but is not cryptographic proof of a trusted evidence producer. Use a patched Docker daemon and trusted, digest-pinned images. Never expose Docker socket or credentials inside the build container.
