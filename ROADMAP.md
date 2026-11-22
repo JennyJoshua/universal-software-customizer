@@ -60,17 +60,18 @@
 
 - [x] Add the initial Docker-only isolated build runner API: explicit approval, digest-pinned pre-provisioned image, no network, non-root execution, read-only source, bounded tmpfs output, resource/time/log limits, and cleanup verification (PR #55). This is not yet a customer-ready workflow or CLI.
 - [x] Stage a bounded immutable source snapshot, exclude VCS/USC metadata and known credential paths, reject symlinks/non-regular files, strip privileged mode bits, and compute a deterministic USC SHA-256 content fingerprint (PR #56).
-- [ ] Complete source-secret review controls and bind the snapshot fingerprint to an exact Git tree SHA and sync history before customer use.
-- [x] Capture approved command identity, command fingerprint, pinned image reference and local image ID, Docker engine version, timestamps, duration, exit outcome, bounded logs, and best-effort redaction; validate the report against a versioned evidence schema (PR #57; 233 tests passed). Actual in-image toolchain inventory implemented and merged (PR #63; CI #246 passed).
+- [x] Bind the source snapshot to the exact Git commit/tree identity and included committed blob IDs; reject dirty/index-mismatched, ignored/untracked, symlink, submodule, filter/smudge, and staging-race cases (PR #59).
+- [x] Add bounded content scanning for selected high-confidence credential formats; block snapshot creation on findings and report only rule IDs/path, never matched values (PR #64; CI #252 passed). This is defence in depth, not comprehensive secret detection.
+- [x] Capture approved command identity, command fingerprint, pinned image reference and local image ID, Docker engine version, timestamps, duration, exit outcome, bounded logs, and best-effort redaction; validate the report against a versioned evidence schema (PR #57).
 - [x] Hash exported output files and create a deterministic artifact inventory digest; reject symlinks, special files, and oversized inventories (PR #57).
-- [x] Capture the full source Git commit/tree identity and bind included staged files to exact committed Git blob IDs; reject dirty/index-mismatched, ignored/untracked, symlink, submodule, filter/smudge, and staging-race cases (PR #59; 248 tests passed).
-- [ ] Complete source-secret review controls and bind build evidence to the accepted upstream baseline and sync history.
-- [ ] Add a reviewed command-profile/CLI approval workflow; current runner remains an internal API.
-- [x] Define a detached, versioned build provenance manifest contract and strict JSON Schema covering source, upstream, customization, build evidence, artifact hashes, and no-release state (PR #58; 239 tests passed).
-- [x] Implement detached manifest construction, evidence/artifact digest verification, exact Git-tree-to-snapshot revalidation, and accepted-sync provenance cross-checks (PR #61; 254 tests passed).
-- [ ] Strengthen secret prevention beyond known-path exclusions and best-effort log redaction before customer use.
+- [x] Bind build evidence and artifact inventory to the accepted upstream baseline and sync history through the validated detached manifest (PR #61).
+- [x] Define a detached, versioned build provenance manifest contract and strict JSON Schema covering source, upstream, customization, build evidence, artifact hashes, and no-release state (PR #58).
+- [x] Implement detached manifest construction, evidence/artifact digest verification, exact Git-tree-to-snapshot revalidation, and accepted-sync provenance cross-checks (PR #61).
 - [x] Capture a fixed in-image toolchain inventory with bounded version output, per-probe isolation, and deterministic digest in build evidence and provenance (PR #63; CI #246 passed).
-- [ ] Produce artifacts without automatic public release; add failure-injection coverage for output-path and export edge cases.
+- [ ] Add a reviewed command-profile/CLI approval workflow; current runner remains an internal API and the existing `approved=True` argument is not a user-facing approval gate.
+- [ ] Validate the runner against a live Docker daemon and verify actual runtime isolation/cleanup behaviour; current runner tests use fake Docker processes.
+- [ ] Complete failure-injection coverage for remaining output-path/export edge cases.
+- [ ] Keep artifacts detached from automatic public release; no automatic publishing or deployment is authorized.
 
 ## Phase 7 — Additional adapters
 
