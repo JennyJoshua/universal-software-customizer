@@ -63,3 +63,12 @@ def test_output_directory_must_be_empty_before_execution(tmp_path):
     (output / "external.txt").write_text("outside", encoding="utf-8")
     with pytest.raises(ValueError, match="empty"):
         _validate(source, output)
+
+
+
+def test_normalized_parent_traversal_cannot_alias_source_as_output(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    traversing_alias = source / ".." / "source"
+    with pytest.raises(ValueError, match="separate"):
+        _validate(source, traversing_alias)
