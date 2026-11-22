@@ -315,6 +315,7 @@ def create_build_provenance_manifest(
         "source_snapshot_sha256", "source_git_commit_sha",
         "source_git_tree_sha", "source_worktree_clean",
         "source_git_identity_error", "excluded_source_path_count",
+        "export_helper_image", "export_helper_image_id", "output_volume_cleanup_confirmed",
         "artifact_inventory", "artifact_inventory_sha256",
         "toolchain_inventory", "toolchain_inventory_sha256",
     )
@@ -323,6 +324,12 @@ def create_build_provenance_manifest(
         raise ValueError("Build evidence is missing provenance fields: " + ", ".join(missing_fields))
     if report["source_git_identity_error"] is not None:
         raise ValueError("Build evidence reports a source Git identity error.")
+    if not isinstance(report["export_helper_image"], str) or not re.search(r"@sha256:[0-9a-f]{64}$", report["export_helper_image"]):
+        raise ValueError("Build evidence does not identify a digest-pinned USC export-helper image.")
+    if not isinstance(report["export_helper_image_id"], str) or not report["export_helper_image_id"]:
+        raise ValueError("Build evidence does not identify the local USC export-helper image ID.")
+    if report["status"] == "passed" and report["output_volume_cleanup_confirmed"] is not True:
+        raise ValueError("A passed build must confirm cleanup of its temporary output volume.")
     toolchain_digest = hashlib.sha256(
         json.dumps(report["toolchain_inventory"], sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -388,6 +395,9 @@ def create_build_provenance_manifest(
             "command_sha256": report["command_sha256"],
             "image": report["image"],
             "docker_image_id": report["docker_image_id"],
+            "export_helper_image": report["export_helper_image"],
+            "export_helper_image_id": report["export_helper_image_id"],
+            "output_volume_cleanup_confirmed": report["output_volume_cleanup_confirmed"],
             "source_snapshot_sha256": snapshot_sha256,
             "artifact_inventory_sha256": artifact_inventory_sha256,
             "docker_engine_version": report.get("docker_engine_version"),
