@@ -749,6 +749,8 @@ def run_isolated_build(
         "exit_code": exit_code,
         "image": image,
         "docker_image_id": docker_image_id,
+        "export_helper_image": _EXPORT_HELPER_IMAGE,
+        "export_helper_image_id": export_helper_image_id,
         "docker_engine_version": docker_engine_version,
         "toolchain_inventory": toolchain_inventory,
         "toolchain_inventory_sha256": toolchain_inventory_sha256,
