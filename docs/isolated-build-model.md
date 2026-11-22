@@ -25,6 +25,37 @@ The source snapshot rejects symlinks and non-regular files, fails on incomplete 
 
 The host output directory must exist, be empty, be writable by the non-root runner, and be separate from (not an ancestor or descendant of) the source directory. Build code writes only to the size-limited container tmpfs; USC copies the output back after execution. Exported symlinks are rejected. This avoids exposing an unbounded host directory as a writable container mount.
 
+## Reviewed CLI approval workflow
+
+The user-facing CLI now separates request creation, explicit review/approval, and execution. The first allowlisted profile is `python-pytest`, which maps to the fixed argv `python -m pytest -q`; callers cannot supply arbitrary commands or shell strings through this workflow.
+
+1. Create a request from a clean Git working tree. The request binds the canonical source path, exact Git commit and tree, digest-pinned image, fixed profile/argv, timeout, log limit, unique approval ID, and expiry (60–1800 seconds; default 900 seconds). Request creation does not execute project code.
+2. Review the request JSON, then run `usc build-approve --request build-request.json --output build-approval.json --approve`. The CLI prints the exact source revision, image, profile, argv, timeout, expiry, and explicit no-release status before creating a receipt.
+3. Run `usc build-run --approval build-approval.json --path ./candidate --output-dir ./build-artifacts --report ./build-evidence.json`. USC authenticates and atomically consumes the receipt before invoking the Docker runner. A receipt cannot be reused; create a new request and approval if an attempt must be repeated.
+
+Example request creation (replace the image placeholder with a locally provisioned, verified digest):
+
+~~~sh
+usc build-request --path ./candidate \\
+  --image python:3.12-slim@sha256:<verified-64-character-digest> \\
+  --profile python-pytest --timeout 300 --expires-in 900 \\
+  --output ./build-request.json
+~~~
+
+Approval and execution:
+
+~~~sh
+usc build-approve --request ./build-request.json \\
+  --output ./build-approval.json --approve
+
+usc build-run --approval ./build-approval.json --path ./candidate \\
+  --output-dir ./build-artifacts --report ./build-evidence.json
+~~~
+
+Receipts use an HMAC key stored under the current user's `~/.usc` directory (directory mode 0700; key mode 0600) and a private one-time-use ledger. This detects accidental/tampered receipt edits and blocks replay in the local state store. It is not a digital signature, cannot prove external human identity, and cannot resist a malicious process running as the same OS user who can alter the key or ledger. It is a local approval guardrail, not a remote authorization service.
+
+The current allowlist intentionally contains only `python-pytest`. Additional profiles require a separate reviewed change and tests. The user-facing workflow requires a clean Git source and refuses non-Git or dirty directories. Keep using synthetic fixtures only; this CLI work does not enable customer repositories.
+
 ## Invocation contract
 
 The Python API is customizer.build_runner.run_isolated_build. It accepts a source directory, an existing output directory, a digest-pinned image, an argv list, and approved=True. The caller must obtain that approval through a separate human-reviewed workflow; the boolean is not a substitute for a user-facing approval gate.
