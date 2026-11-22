@@ -27,7 +27,7 @@ The host output directory must exist, be empty, be writable by the non-root runn
 
 ## Reviewed CLI approval workflow
 
-The user-facing CLI now separates request creation, explicit review/approval, and execution. The first allowlisted profile is `python-pytest`, which maps to the fixed argv `python -m pytest -q`; callers cannot supply arbitrary commands or shell strings through this workflow.
+The user-facing CLI now separates request creation, explicit review/approval, and execution. The fixed allowlist currently contains `python-pytest` (`python -m pytest -q`) and `python-container-smoke` (a fixed synthetic-only probe of container isolation); callers cannot supply arbitrary commands or shell strings through this workflow.
 
 1. Create a request from a clean Git working tree. The request binds the canonical source path, exact Git commit and tree, digest-pinned image, fixed profile/argv, timeout, log limit, unique approval ID, and expiry (60–1800 seconds; default 900 seconds). Request creation does not execute project code.
 2. Review the request JSON, then run `usc build-approve --request build-request.json --output build-approval.json --approve`. The CLI prints the exact source revision, image, profile, argv, timeout, expiry, and explicit no-release status before creating a receipt.
@@ -54,7 +54,7 @@ usc build-run --approval ./build-approval.json --path ./candidate \
 
 Receipts use an HMAC key stored under the current user's `~/.usc` directory (directory mode 0700; key mode 0600) and a private one-time-use ledger. This detects accidental/tampered receipt edits and blocks replay in the local state store. It is not a digital signature, cannot prove external human identity, and cannot resist a malicious process running as the same OS user who can alter the key or ledger. It is a local approval guardrail, not a remote authorization service.
 
-The current allowlist intentionally contains only `python-pytest`. Additional profiles require a separate reviewed change and tests. The user-facing workflow requires a clean Git source and refuses non-Git or dirty directories. Keep using synthetic fixtures only; this CLI work does not enable customer repositories.
+The `python-container-smoke` profile exists only to validate the runner against a synthetic fixture in the trusted-main Docker validation workflow; it is not intended for customer project testing. Additional profiles require a separate reviewed change and tests. The user-facing workflow requires a clean Git source and refuses non-Git or dirty directories. Keep using synthetic fixtures only; this CLI work does not enable customer repositories.
 
 ## Low-level Python API boundary
 
