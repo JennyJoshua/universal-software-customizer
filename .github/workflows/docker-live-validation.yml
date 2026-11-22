@@ -91,6 +91,9 @@ jobs:
 
           temp = Path(os.environ["RUNNER_TEMP"])
           report = json.loads((temp / "build-evidence.json").read_text())
+          print("Build evidence:", json.dumps(report, indent=2))
+          artifact_dir = temp / "usc-docker-artifacts"
+          print("Exported filesystem entries:", [str(path.relative_to(artifact_dir)) for path in artifact_dir.rglob("*")])
           assert report["status"] == "passed", report
           assert report["executed"] is True
           assert report["source_read_only"] is True
