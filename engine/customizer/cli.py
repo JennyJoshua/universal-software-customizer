@@ -184,23 +184,39 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "build-request":
-            source_root = Path(args.path).expanduser().resolve(strict=True)
             report = create_build_approval_request(
-                source_root, image=args.image, profile=args.profile,
+                args.path, image=args.image, profile=args.profile,
                 timeout_seconds=args.timeout, expires_in_seconds=args.expires_in,
             )
-            _write_report(report, args.output, source_root)
+            _write_report(report, args.output, Path(report["source_path"]))
         elif args.command == "build-approve":
             request_path = Path(args.request).expanduser()
             if request_path.is_symlink():
                 raise ValueError("Build request file must not be a symlink.")
             request_data = json.loads(request_path.read_text(encoding="utf-8"))
             source_root = Path(request_data["source_path"]).expanduser().resolve(strict=True)
+            print(
+                "USC build approval review:\\n"
+                f"  Source: {source_root}\\n"
+                f"  Commit: {request_data.get('source_git_commit_sha')}\\n"
+                f"  Tree: {request_data.get('source_git_tree_sha')}\\n"
+                f"  Image: {request_data.get('image')}\\n"
+                f"  Profile: {request_data.get('profile')}\\n"
+                f"  Command: {request_data.get('command_argv')}\\n"
+                f"  Timeout: {request_data.get('timeout_seconds')} seconds\\n"
+                f"  Expires: {request_data.get('expires_at')}\\n"
+                "  Release/deployment: NOT authorized",
+                file=sys.stderr,
+            )
             receipt = approve_build_request(args.request, approved=args.approve)
             _write_report(receipt, args.output, source_root)
         elif args.command == "build-run":
-            source_root = Path(args.path).expanduser().resolve(strict=True)
-            output_dir = Path(args.output_dir).expanduser().resolve(strict=True)
+            supplied_source = Path(args.path).expanduser()
+            supplied_output = Path(args.output_dir).expanduser()
+            if supplied_source.is_symlink() or supplied_output.is_symlink():
+                raise ValueError("Build source and artifact directories must not be symlinks.")
+            source_root = supplied_source.resolve(strict=True)
+            output_dir = supplied_output.resolve(strict=True)
             if output_dir == source_root or source_root in output_dir.parents or output_dir in source_root.parents:
                 raise ValueError("Build artifact directory must be separate from the source directory.")
             if args.report:
@@ -208,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
                 if report_path == output_dir or output_dir in report_path.parents:
                     raise ValueError("Build evidence report must be outside the artifact directory.")
             approved = consume_build_approval(
-                args.approval, source_path=source_root, output_path=output_dir,
+                args.approval, source_path=supplied_source, output_path=supplied_output,
             )
             report = run_isolated_build(
                 approved["source_path"], approved["output_path"],
