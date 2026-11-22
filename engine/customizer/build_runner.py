@@ -564,8 +564,6 @@ def run_isolated_build(
             "executed": False,
             "image": image,
             "docker_image_id": docker_image_id,
-        "export_helper_image": _EXPORT_HELPER_IMAGE,
-        "export_helper_image_id": export_helper_image_id,
             "export_helper_image": _EXPORT_HELPER_IMAGE,
             "errors": ["The pinned USC export-helper image is not available locally; image pulling is disabled."],
         })
