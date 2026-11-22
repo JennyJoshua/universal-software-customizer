@@ -240,3 +240,28 @@ def test_container_smoke_profile_is_fixed_and_allowlisted():
     assert "'/src'" in command[2]
     assert "'/out'" in command[2]
     assert "connect_ex" in command[2]
+
+
+
+def test_nonempty_artifact_directory_does_not_consume_approval(tmp_path):
+    source = tmp_path / "source"
+    _git_source(source)
+    request_path, _ = _request(tmp_path, source)
+    state = _state(tmp_path)
+    receipt = approve_build_request(request_path, approved=True, state_dir=state)
+    receipt_path = tmp_path / "receipt.json"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    output = tmp_path / "artifacts"
+    output.mkdir()
+    (output / "keep.txt").write_text("existing", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must be empty"):
+        consume_build_approval(
+            receipt_path, source_path=source, output_path=output, state_dir=state,
+        )
+
+    (output / "keep.txt").unlink()
+    result = consume_build_approval(
+        receipt_path, source_path=source, output_path=output, state_dir=state,
+    )
+    assert result["approval_id"] == receipt["request"]["approval_id"]
