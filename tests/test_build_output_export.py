@@ -77,7 +77,10 @@ def test_export_requires_helper_to_be_running_and_copies_from_that_container(tmp
     monkeypatch.setattr("customizer.build_runner.subprocess.run", fake_run)
     assert _export_container_output("/usr/bin/docker", "export-helper-id", output, identity) is True
     assert captured[0] == ["/usr/bin/docker", "inspect", "--format", "{{.State.Running}}", "export-helper-id"]
-    assert captured[1] == ["/usr/bin/docker", "cp", "export-helper-id:/out/.", str(output)]
+    assert captured[1][:3] == ["/usr/bin/docker", "cp", "export-helper-id:/out/."]
+    staged_target = Path(captured[1][3])
+    assert staged_target.parent == output.parent
+    assert staged_target.name.startswith(".usc-export-")
 
 
 def test_export_refuses_a_stopped_helper(tmp_path, monkeypatch):
