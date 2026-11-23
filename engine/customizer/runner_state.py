@@ -31,6 +31,8 @@ class RunnerStateStore:
             raise RuntimeError("Runner state store is already started.")
         if not self.db_path.is_absolute():
             raise ProtocolError("Runner state database path must be absolute.")
+        if self.db_path.name in {"", ".", ".."}:
+            raise ProtocolError("Runner state database filename is invalid.")
         parent = self.db_path.parent
         if parent.is_symlink():
             raise ProtocolError("Runner state directory must not be a symlink.")
@@ -98,6 +100,12 @@ class RunnerStateStore:
             integrity = self._db.execute("PRAGMA quick_check").fetchone()[0]
             if integrity != "ok":
                 raise ProtocolError("Runner state database integrity check failed.")
+        except ProtocolError:
+            self.close()
+            raise
+        except sqlite3.DatabaseError as exc:
+            self.close()
+            raise ProtocolError("Runner state database initialization or integrity check failed.") from exc
         except Exception:
             self.close()
             raise
@@ -113,7 +121,10 @@ class RunnerStateStore:
                 yield
                 self._db.execute("COMMIT")
             except Exception:
-                self._db.execute("ROLLBACK")
+                try:
+                    self._db.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
                 raise
 
     def request_seen(self, request_id):
