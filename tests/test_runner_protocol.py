@@ -108,3 +108,28 @@ def test_privileged_or_invalid_peer_identity_is_rejected():
     for uid in (0, -1, True, "1000"):
         with pytest.raises(ProtocolError):
             authorize_peer(uid, operation="submit", operator_uids={1000})
+
+@pytest.mark.parametrize("mutation", [
+    lambda m: m.update(operation=[]),
+    lambda m: m.update(protocol_version=[]),
+    lambda m: m["job"].update(profile_id=[]),
+    lambda m: m["job"].update(policy_version=[]),
+])
+def test_rejects_wrong_json_value_types_without_leaking_type_errors(mutation):
+    message = submit_message()
+    mutation(message)
+    with pytest.raises(ProtocolError):
+        decode_message(json.dumps(message), now=NOW)
+
+
+def test_rejects_nonstandard_json_constants_and_surrogate_text():
+    with pytest.raises(ProtocolError, match="Non-standard"):
+        decode_message('{"protocol_version": NaN}')
+    with pytest.raises(ProtocolError, match="UTF-8"):
+        decode_message("\ud800")
+
+
+def test_rejects_invalid_authorization_context():
+    for operation, owner in (([], 1000), ("status", 0), ("status", True)):
+        with pytest.raises(ProtocolError):
+            authorize_peer(1000, operation=operation, job_owner_uid=owner)
