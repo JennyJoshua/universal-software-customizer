@@ -122,6 +122,11 @@ def test_runner_service_identity_is_separated_from_control_plane():
             "socket_gid=int(sys.argv[3]), state_db_path=sys.argv[4]); "
             "b.start(); print('READY', flush=True); b.serve_forever()"
         )
+        client_code = (
+            "import json,sys; from customizer.local_runner_broker import send_local_request; "
+            "print(json.dumps(send_local_request(sys.argv[1], json.loads(sys.argv[2]))))"
+        )
+
         def start_broker():
             return subprocess.Popen(
                 ["sudo", "-n", "-u", runner, "--", "env", f"PYTHONPATH={repo_engine}",
@@ -132,19 +137,32 @@ def test_runner_service_identity_is_separated_from_control_plane():
                 start_new_session=True,
             )
 
-        def wait_for_socket(process):
+        def wait_for_broker_response(process):
             deadline = time.monotonic() + 10
+            probe_message = {
+                "protocol_version": "1",
+                "request_id": str(uuid4()),
+                "operation": "status",
+                "job_id": str(uuid4()),
+            }
             while time.monotonic() < deadline:
-                if _sudo("test", "-S", socket_path, check=False).returncode == 0:
-                    return
                 if process.poll() is not None:
                     error = process.stderr.read() if process.stderr else ""
                     pytest.fail(f"Runner broker exited during startup: {error}")
+                probe = _sudo(
+                    "-u", client, "--", "env", f"PYTHONPATH={repo_engine}",
+                    "python3", "-c", client_code, socket_path, json.dumps(probe_message),
+                    check=False,
+                )
+                if probe.returncode == 0:
+                    response = json.loads(probe.stdout.strip())
+                    if response.get("error") == "Unknown job or unauthorized operation.":
+                        return
                 time.sleep(0.05)
-            pytest.fail("Runner broker did not create its socket.")
+            pytest.fail("Runner broker did not answer a protocol request.")
 
         broker_process = start_broker()
-        wait_for_socket(broker_process)
+        wait_for_broker_response(broker_process)
 
         # Verify owner/group/mode on the service socket.
         socket_stat = _sudo("stat", "-c", "%u:%g:%a", socket_path).stdout.strip()
@@ -153,10 +171,6 @@ def test_runner_service_identity_is_separated_from_control_plane():
         assert state_stat == f"{runner_uid}:600"
         assert _sudo("-u", client, "--", "cat", state_db_path, check=False).returncode != 0
 
-        client_code = (
-            "import json,sys; from customizer.local_runner_broker import send_local_request; "
-            "print(json.dumps(send_local_request(sys.argv[1], json.loads(sys.argv[2]))))"
-        )
         original_submission = _submit_message()
         submitted = _sudo(
             "-u", client, "--", "env", f"PYTHONPATH={repo_engine}", "python3", "-c", client_code,
@@ -182,7 +196,7 @@ def test_runner_service_identity_is_separated_from_control_plane():
         broker_process = None
 
         broker_process = start_broker()
-        wait_for_socket(broker_process)
+        wait_for_broker_response(broker_process)
 
         status_message = {
             "protocol_version": "1",
