@@ -106,11 +106,11 @@ def create_source_review(source_path: str | Path) -> dict:
         "execution_performed": False,
         "human_review_required": True,
         "source_path": str(source),
-        "included_file_count": file_count,
+        "scanned_file_count": file_count,
         "included_bytes": total_bytes,
         "excluded_path_count": excluded_count,
         "potential_secret_finding_count": finding_count,
-        "entries": entries,
+        "entries": sorted(entries, key=lambda item: item["path"]),
         "entries_truncated": total_entries > len(entries),
         "review_note": "Review every listed path before requesting a build. Excluded paths are not tested. Potential secret patterns block later snapshot staging; this finite scanner cannot prove that a source tree is secret-free. This report does not approve or execute a build.",
     }
