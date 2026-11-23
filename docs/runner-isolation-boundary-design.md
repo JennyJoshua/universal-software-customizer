@@ -202,6 +202,8 @@ On failure:
 - [x] Verify in the ephemeral CI fixture that runner/control-plane accounts are not members of the Docker group and cannot read the Docker socket when present.
 - [x] Require a broker-owned SQLite database in group-access mode; enforce a service-owned 0700 state directory, 0600 single-link database file, transactional request/approval replay records, schema version, and startup integrity check (Stage 1 durable-state batch).
 - [x] Verify job state and replay identifiers survive a normal broker restart; verify the control-plane UID cannot read the database in the ephemeral CI fixture.
+- [x] Require broker-owned SQLite state in group-access mode with a service-owned 0700 parent, a single-link 0600 database, explicit write transactions, unique request/approval IDs, full synchronous commits, rollback journaling, schema versioning, and startup integrity checks (PR #91; CI #342 passed).
+- [x] Verify job state and replay identifiers survive a normal broker restart, and that the control-plane UID cannot read the database (PR #91).
 - [ ] Test abrupt process termination, SQLite recovery/corruption, disk-full behavior, capacity exhaustion, retention, and cleanup failure.
 - [ ] Define and validate permanent host provisioning, systemd service lifecycle, operational logging, and restart/cleanup ownership; no permanent service accounts are installed by this project.
 - [ ] Add protocol fuzzing and independent approval-signature/tampering tests; approval IDs are replay identifiers, not proof of human consent.
