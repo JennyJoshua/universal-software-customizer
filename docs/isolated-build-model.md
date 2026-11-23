@@ -69,6 +69,47 @@ docker image inspect busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4
 
 The second command must resolve successfully. USC never pulls the helper image during a build and blocks execution if this exact digest is unavailable.
 
+## Trusted image provisioning, updates, and rollback
+
+Digest pinning makes the selected image content immutable for a build; it does not establish that the publisher, registry, or image contents are trustworthy. Treat image selection and provisioning as a separately reviewed supply-chain operation.
+
+### Initial provisioning
+
+1. Select images only from an explicitly approved publisher and registry. Verify the official publisher/project page, repository ownership, supported release channel, and image documentation independently; do not infer publisher trust from a familiar name or a tag.
+2. Record the intended platform (for example, linux/amd64), image repository, human-readable release tag, and the full 64-character sha256 digest. Tags are discovery labels only and must never be used as the execution reference.
+3. Pull the selected tag only on a trusted provisioning host or trusted-main workflow. Do not pull images from an untrusted pull-request job or from inside a build container.
+4. Inspect the local image and its repository digests. Confirm that the expected repository and digest are present, and record the immutable image ID, platform, creation time, and relevant labels. A successful pull or image ID alone does not verify publisher identity.
+5. Compare the observed digest with the digest approved in the change review. If the expected digest cannot be independently established, stop; do not substitute the newest tag or another digest.
+6. Run USC with the exact digest reference. USC uses `--pull=never` and must fail closed when the image is not already present.
+
+Example inspection commands (replace placeholders with the reviewed repository and digest):
+
+~~~sh
+docker pull <approved-repository>:<reviewed-tag>
+docker image inspect <approved-repository>@sha256:<reviewed-digest> \
+  --format 'ID={{.Id}} OS={{.Os}} ARCH={{.Architecture}} CREATED={{.Created}} DIGESTS={{json .RepoDigests}}'
+~~~
+
+The returned repository digest must match the reviewed digest exactly. Keep the command output in the image-provisioning change record; do not put credentials or private registry tokens in the record.
+
+### Controlled updates
+
+- Propose image updates in a dedicated pull request; do not silently move a digest or update a tag in place.
+- Review publisher advisories, release notes, provenance/signature information when available, vulnerability results, platform compatibility, and the exact digest change.
+- Pull and inspect the candidate image on the trusted provisioning host, then run the synthetic USC validation workflow against that exact digest.
+- Update the pinned digest and this document together only after the review and synthetic validation pass. Keep the previous approved digest in the change record for rollback.
+- Keep build and exporter images as separate trust decisions. The exporter is also executable code and must have its own publisher, digest, update, and rollback review.
+
+### Local cache and rollback
+
+- Provision only the exact reviewed digests needed for the approved profiles. Do not use floating tags as build inputs.
+- Keep a record of which digests are provisioned on each trusted runner. Remove obsolete cached images only through an explicit maintenance action after confirming that no active validation or rollback depends on them.
+- If an updated image fails validation or is withdrawn, restore the previous reviewed digest in the configuration and re-provision that exact digest from the trusted registry. Re-run the synthetic validation before accepting the rollback.
+- If the previous digest is no longer available from a trusted source, stop execution rather than substituting a different image.
+- Never mount the Docker socket, host credentials, SSH keys, browser sessions, or personal files into image-provisioning or build containers.
+
+This procedure is an operational control, not a guarantee that an image is benign. Registry compromise, publisher compromise, a hostile Docker daemon, and vulnerabilities in the host/runtime remain outside the protection provided by digest pinning. Customer-source execution remains disabled pending the independent security review and the Phase 6 P0 gates.
+
 ## Low-level Python API boundary
 
 The Python function `customizer.build_runner.run_isolated_build` is a low-level internal interface. Its `approved=True` argument is not a substitute for the reviewed CLI receipt workflow and can bypass that workflow when called directly by application code. Normal build requests must use `usc build-request`, `usc build-approve`, and `usc build-run` as described above. Do not expose the low-level function directly to untrusted callers.
