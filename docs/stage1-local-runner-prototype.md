@@ -61,3 +61,10 @@
 - CI checks the service configuration and exercises graceful shutdown using temporary service accounts.
 - No permanent users/groups are created by the repository, and no unit is installed, enabled, or started on a real host.
 
+
+
+## Next security design — signed approval contract
+
+- The Ed25519/OpenSSL approval-signature contract is documented in `docs/approval-signature-contract.md`.
+- This is design only. The current broker still accepts approval IDs as replay identifiers; it does not yet verify a signature or prove human consent.
+- Protocol v2, the trusted public-key verifier, nonce persistence, tamper tests, and an ephemeral third approval-authority identity remain implementation gates.
