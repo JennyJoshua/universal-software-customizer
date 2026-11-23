@@ -39,7 +39,8 @@
 ## What this prototype does not establish
 
 - The broker does not verify an independently signed approval or prove human consent; an approval ID is only a replay identifier at this stage.
-- SQLite recovery under abrupt power loss, disk-full conditions, corruption, backup/restore, retention, and long-duration stress still require testing.
+- Corrupt database startup is rejected, and an injected mid-submit failure proves the transaction rolls back both the job and replay record.
+- Recovery during an active commit or power loss, disk-full conditions, backup/restore, retention, and long-duration stress still require testing.
 - Permanent OS users/groups, a systemd unit, host provisioning, and production service lifecycle are not installed.
 - No Docker daemon is contacted, no command is run, no source path is opened or transferred, and no artifact is produced.
 - Same-host process/account separation does not protect against host root, kernel compromise, or a privileged administrator.

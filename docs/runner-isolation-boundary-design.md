@@ -204,7 +204,9 @@ On failure:
 - [x] Verify job state and replay identifiers survive a normal broker restart; verify the control-plane UID cannot read the database in the ephemeral CI fixture.
 - [x] Require broker-owned SQLite state in group-access mode with a service-owned 0700 parent, a single-link 0600 database, explicit write transactions, unique request/approval IDs, full synchronous commits, rollback journaling, schema versioning, and startup integrity checks (PR #91; CI #342 passed).
 - [x] Verify job state and replay identifiers survive a normal broker restart, and that the control-plane UID cannot read the database (PR #91).
-- [ ] Test abrupt process termination, SQLite recovery/corruption, disk-full behavior, capacity exhaustion, retention, and cleanup failure.
+- [x] Test abrupt broker-process termination after a committed request, stale-socket recovery, normal restart, persisted job state, and replay rejection (Stage 1 crash-recovery test batch).
+- [x] Reject a corrupt SQLite database at startup and inject a mid-submit ledger failure to verify transaction rollback leaves no job or replay record.
+- [ ] Test recovery during an active commit/power loss, disk-full behavior, backup/restore, retention, and cleanup failure.
 - [ ] Define and validate permanent host provisioning, systemd service lifecycle, operational logging, and restart/cleanup ownership; no permanent service accounts are installed by this project.
 - [ ] Add protocol fuzzing and independent approval-signature/tampering tests; approval IDs are replay identifiers, not proof of human consent.
 - [ ] Independently verify that production control-plane identities cannot access real runner keys, persistent replay state, workspaces, or the Docker daemon.

@@ -123,3 +123,13 @@ def test_state_database_rejects_unknown_schema_version(tmp_path):
     path.chmod(0o600)
     with pytest.raises(ProtocolError, match="Unsupported"):
         RunnerStateStore(path).start()
+
+
+
+def test_state_database_rejects_corrupt_existing_database(tmp_path):
+    state_dir = _private_state_dir(tmp_path)
+    path = state_dir / "broker.sqlite3"
+    path.write_bytes(b"not-a-sqlite-database")
+    path.chmod(0o600)
+    with pytest.raises(ProtocolError, match="database"):
+        RunnerStateStore(path).start()

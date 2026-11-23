@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -122,25 +121,47 @@ def test_runner_service_identity_is_separated_from_control_plane():
             "socket_gid=int(sys.argv[3]), state_db_path=sys.argv[4]); "
             "b.start(); print('READY', flush=True); b.serve_forever()"
         )
-        broker_process = subprocess.Popen(
-            ["sudo", "-n", "-u", runner, "--", "env", f"PYTHONPATH={repo_engine}",
-             "python3", "-c", server_code, socket_path, str(client_uid), str(group_gid), state_db_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
+        client_code = (
+            "import json,sys; from customizer.local_runner_broker import send_local_request; "
+            "print(json.dumps(send_local_request(sys.argv[1], json.loads(sys.argv[2]))))"
         )
 
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            if _sudo("test", "-S", socket_path, check=False).returncode == 0:
-                break
-            if broker_process.poll() is not None:
-                error = broker_process.stderr.read() if broker_process.stderr else ""
-                pytest.fail(f"Runner broker exited during startup: {error}")
-            time.sleep(0.05)
-        else:
-            pytest.fail("Runner broker did not create its socket.")
+        def start_broker():
+            return subprocess.Popen(
+                ["sudo", "-n", "-u", runner, "--", "env", f"PYTHONPATH={repo_engine}",
+                 "python3", "-c", server_code, socket_path, str(client_uid), str(group_gid), state_db_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+
+        def wait_for_broker_response(process):
+            deadline = time.monotonic() + 10
+            probe_message = {
+                "protocol_version": "1",
+                "request_id": str(uuid4()),
+                "operation": "status",
+                "job_id": str(uuid4()),
+            }
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    error = process.stderr.read() if process.stderr else ""
+                    pytest.fail(f"Runner broker exited during startup: {error}")
+                probe = _sudo(
+                    "-u", client, "--", "env", f"PYTHONPATH={repo_engine}",
+                    "python3", "-c", client_code, socket_path, json.dumps(probe_message),
+                    check=False,
+                )
+                if probe.returncode == 0:
+                    response = json.loads(probe.stdout.strip())
+                    if response.get("error") == "Unknown job or unauthorized operation.":
+                        return
+                time.sleep(0.05)
+            pytest.fail("Runner broker did not answer a protocol request.")
+
+        broker_process = start_broker()
+        wait_for_broker_response(broker_process)
 
         # Verify owner/group/mode on the service socket.
         socket_stat = _sudo("stat", "-c", "%u:%g:%a", socket_path).stdout.strip()
@@ -149,13 +170,10 @@ def test_runner_service_identity_is_separated_from_control_plane():
         assert state_stat == f"{runner_uid}:600"
         assert _sudo("-u", client, "--", "cat", state_db_path, check=False).returncode != 0
 
-        client_code = (
-            "import json,sys; from customizer.local_runner_broker import send_local_request; "
-            "print(json.dumps(send_local_request(sys.argv[1], json.loads(sys.argv[2]))))"
-        )
+        original_submission = _submit_message()
         submitted = _sudo(
             "-u", client, "--", "env", f"PYTHONPATH={repo_engine}", "python3", "-c", client_code,
-            socket_path, json.dumps(_submit_message()),
+            socket_path, json.dumps(original_submission),
         )
         accepted = json.loads(submitted.stdout.strip())
         assert accepted["ok"] is True
@@ -170,16 +188,53 @@ def test_runner_service_identity_is_separated_from_control_plane():
         assert rejected["ok"] is False
         assert "not authorized" in rejected["error"].lower()
 
+        # Kill the broker without graceful cleanup, then verify stale-socket
+        # recovery and durable job/replay state after a fresh process starts.
+        _sudo("pkill", "-KILL", "-u", runner, check=False)
+        broker_process.wait(timeout=5)
+        assert _sudo("pgrep", "-u", runner, check=False).returncode != 0
+        broker_process = None
+
+        broker_process = start_broker()
+        wait_for_broker_response(broker_process)
+
+        status_message = {
+            "protocol_version": "1",
+            "request_id": str(uuid4()),
+            "operation": "status",
+            "job_id": accepted["job_id"],
+        }
+        status_result = _sudo(
+            "-u", client, "--", "env", f"PYTHONPATH={repo_engine}", "python3", "-c", client_code,
+            socket_path, json.dumps(status_message), check=False,
+        )
+        assert status_result.returncode == 0, status_result.stderr
+        persisted_status = json.loads(status_result.stdout.strip())
+        assert persisted_status["ok"] is True
+        assert persisted_status["state"] == "queued"
+
+        replayed_request = _sudo(
+            "-u", client, "--", "env", f"PYTHONPATH={repo_engine}", "python3", "-c", client_code,
+            socket_path, json.dumps(original_submission),
+        )
+        assert json.loads(replayed_request.stdout.strip())["error"] == "Duplicate request ID."
+
+        replayed_approval = _submit_message()
+        replayed_approval["job"]["approval_id"] = original_submission["job"]["approval_id"]
+        replayed_approval_result = _sudo(
+            "-u", client, "--", "env", f"PYTHONPATH={repo_engine}", "python3", "-c", client_code,
+            socket_path, json.dumps(replayed_approval),
+        )
+        assert "already been submitted" in json.loads(replayed_approval_result.stdout.strip())["error"]
+
     finally:
         if broker_process is not None and broker_process.poll() is None:
+            _sudo("pkill", "-KILL", "-u", runner, check=False)
             try:
-                os.killpg(broker_process.pid, signal.SIGTERM)
                 broker_process.wait(timeout=5)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
-                try:
-                    os.killpg(broker_process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+            except subprocess.TimeoutExpired:
+                broker_process.kill()
+                broker_process.wait(timeout=5)
         _sudo("rm", "-rf", base, check=False)
         for username in reversed(created_users):
             _sudo("userdel", username, check=False)
