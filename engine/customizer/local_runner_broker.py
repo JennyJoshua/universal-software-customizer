@@ -15,6 +15,10 @@ from pathlib import Path
 from uuid import uuid4
 from .runner_protocol import MAX_MESSAGE_BYTES, ProtocolError, authorize_peer, decode_message
 
+MAX_JOBS = 1000
+MAX_REQUESTS = 10000
+CONNECTION_TIMEOUT_SECONDS = 2.0
+
 
 def _read_request(connection):
     chunks = []
@@ -128,8 +132,8 @@ class LocalRunnerBroker:
                     break
                 raise
             with connection:
-                connection.settimeout(CONNECTION_TIMEOUT_SECONDS)
                 try:
+                    connection.settimeout(CONNECTION_TIMEOUT_SECONDS)
                     uid = _peer_uid(connection)
                     message = decode_message(_read_request(connection))
                     result = self._dispatch(uid, message)
