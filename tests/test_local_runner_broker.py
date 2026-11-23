@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import socket
 import stat
 import threading
 from datetime import datetime, timedelta, timezone
@@ -213,7 +214,7 @@ def test_broker_removes_only_a_stale_owned_socket(tmp_path):
     socket_dir = tmp_path / "private"
     socket_dir.mkdir(mode=0o700)
     socket_path = socket_dir / "runner.sock"
-    stale = __import__("socket").socket(__import__("socket").AF_UNIX, __import__("socket").SOCK_STREAM)
+    stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     stale.bind(str(socket_path))
     stale.close()
     broker = LocalRunnerBroker(socket_path, submitter_uids={os.getuid()})
