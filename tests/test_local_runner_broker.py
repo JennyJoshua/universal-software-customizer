@@ -193,3 +193,32 @@ def test_broker_enforces_in_memory_capacity_limit(running_broker, monkeypatch):
     response = send_local_request(running_broker.socket_path, submit_message())
     assert response["ok"] is False
     assert response["error"] == "Broker job capacity has been reached."
+
+
+
+def test_broker_does_not_unlink_an_active_socket(tmp_path):
+    socket_path = tmp_path / "private" / "runner.sock"
+    first = LocalRunnerBroker(socket_path, submitter_uids={os.getuid()})
+    first.start()
+    second = LocalRunnerBroker(socket_path, submitter_uids={os.getuid()})
+    try:
+        with pytest.raises(ValueError, match="already listening"):
+            second.start()
+        assert stat.S_ISSOCK(socket_path.stat(follow_symlinks=False).st_mode)
+    finally:
+        first.close()
+
+
+def test_broker_removes_only_a_stale_owned_socket(tmp_path):
+    socket_dir = tmp_path / "private"
+    socket_dir.mkdir(mode=0o700)
+    socket_path = socket_dir / "runner.sock"
+    stale = __import__("socket").socket(__import__("socket").AF_UNIX, __import__("socket").SOCK_STREAM)
+    stale.bind(str(socket_path))
+    stale.close()
+    broker = LocalRunnerBroker(socket_path, submitter_uids={os.getuid()})
+    broker.start()
+    try:
+        assert stat.S_ISSOCK(socket_path.stat(follow_symlinks=False).st_mode)
+    finally:
+        broker.close()
