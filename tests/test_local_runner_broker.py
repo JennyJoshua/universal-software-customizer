@@ -85,7 +85,7 @@ def test_broker_rejects_unknown_fields_and_unknown_jobs(running_broker):
         "protocol_version": "1", "request_id": str(uuid4()),
         "operation": "status", "job_id": str(uuid4()),
     })
-    assert unknown["ok"] is False and unknown["error"] == "Unknown job."
+    assert unknown["ok"] is False and unknown["error"] == "Unknown job or unauthorized operation."
 
 
 def test_broker_blocks_duplicate_request_and_approval_replay(running_broker):
@@ -168,7 +168,7 @@ def test_broker_restart_loses_in_memory_jobs_by_design(tmp_path):
             "protocol_version": "1", "request_id": str(uuid4()),
             "operation": "status", "job_id": submitted["job_id"],
         })
-        assert status["ok"] is False and status["error"] == "Unknown job."
+        assert status["ok"] is False and status["error"] == "Unknown job or unauthorized operation."
     finally:
         second.close()
         thread2.join(timeout=2)
