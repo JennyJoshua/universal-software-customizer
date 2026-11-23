@@ -325,3 +325,14 @@ def test_supported_execution_api_consumes_receipt_before_runner(tmp_path, monkey
         execute_approved_build(
             receipt_path, source_path=source, output_path=output, state_dir=state,
         )
+
+
+
+def test_low_level_runner_is_not_exported_under_its_old_public_name():
+    import customizer.build_runner as runner
+    import customizer.cli as cli
+
+    assert not hasattr(runner, "run_isolated_build")
+    assert hasattr(runner, "_run_isolated_build")
+    assert not hasattr(cli, "run_isolated_build")
+    assert hasattr(cli, "execute_approved_build")
