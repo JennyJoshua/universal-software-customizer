@@ -22,7 +22,7 @@ The prototype broker:
 
 The default local test mode runs as the current user with a 0700 directory / 0600 socket. The optional group mode supports a distinct runner UID and client group only when an administrator has provisioned the directory with the exact 2710 ownership/mode policy. The broker checks the connecting UID with kernel peer credentials; group membership alone never authorizes an operation.
 
-CI includes an ephemeral Linux integration test that creates temporary runner, client, and unauthorized-client accounts. It starts the broker as the runner UID, verifies that the client can connect through the group socket but cannot list the socket directory or read a runner-private synthetic key file, and confirms that an unapproved UID in the same group is denied. It also verifies that the runner/client accounts are not members of the Docker group and cannot read a Docker socket when one is present. These accounts are removed after the test.
+CI includes an ephemeral Linux integration test that creates temporary runner, client, and unauthorized-client accounts. It starts the broker as the runner UID, verifies that the client can connect through the group socket but cannot list the socket directory or read a runner-private synthetic key file or SQLite state database, and confirms that an unapproved UID in the same group is denied. It also verifies that the runner/client accounts are not members of the Docker group and cannot read a Docker socket when one is present. These accounts are removed after the test.
 
 This is a test of the proposed OS permission boundary, not a persistent installation or production service. A future service deployment must still provision and manage its own identities. Before such a deployment, define and test:
 - A dedicated runner service UID with no interactive login and no membership in unrelated groups.
@@ -37,7 +37,7 @@ The ephemeral CI test proves the fixture-level boundary only. It does not provis
 
 ## Security and functional limitations
 
-- - In-memory private development mode loses jobs and replay IDs on restart. Group-access mode requires SQLite persistence, but power-loss recovery, corruption handling, backup/restore, retention, and long-duration stress still need dedicated testing.
+- In-memory private development mode loses jobs and replay IDs on restart. Group-access mode requires SQLite persistence, but power-loss recovery, corruption handling, backup/restore, retention, and long-duration stress still need dedicated testing.
 - The broker does not verify a signed approval or independently authenticate a human approver.
 - A queued job is only a synthetic record. No process is started, no Docker daemon is contacted, no source path is opened, and no artifact is produced.
 - Cancellation only changes the synthetic queued state.
