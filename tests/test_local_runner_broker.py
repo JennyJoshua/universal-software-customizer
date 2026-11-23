@@ -109,7 +109,8 @@ def test_broker_uses_kernel_peer_uid_not_caller_supplied_field(running_broker, m
         "protocol_version": "1", "request_id": str(uuid4()),
         "operation": "status", "job_id": submitted["job_id"],
     })
-    assert response["ok"] is False and "not authorized" in response["error"]
+    assert response["ok"] is False
+    assert response["error"] == "Unknown job or unauthorized operation."
 
 
 def test_broker_refuses_to_replace_regular_file_or_symlink_socket_path(tmp_path):
@@ -170,3 +171,25 @@ def test_broker_restart_loses_in_memory_jobs_by_design(tmp_path):
     finally:
         second.close()
         thread2.join(timeout=2)
+
+
+
+def test_broker_rejects_replayed_status_request_id(running_broker):
+    submitted = send_local_request(running_broker.socket_path, submit_message())
+    request_id = str(uuid4())
+    status_message = {
+        "protocol_version": "1", "request_id": request_id,
+        "operation": "status", "job_id": submitted["job_id"],
+    }
+    assert send_local_request(running_broker.socket_path, status_message)["ok"] is True
+    replay = send_local_request(running_broker.socket_path, status_message)
+    assert replay["ok"] is False
+    assert replay["error"] == "Duplicate request ID."
+
+
+def test_broker_enforces_in_memory_capacity_limit(running_broker, monkeypatch):
+    import customizer.local_runner_broker as broker_module
+    monkeypatch.setattr(broker_module, "MAX_JOBS", 0)
+    response = send_local_request(running_broker.socket_path, submit_message())
+    assert response["ok"] is False
+    assert response["error"] == "Broker job capacity has been reached."
