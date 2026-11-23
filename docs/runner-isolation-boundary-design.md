@@ -206,6 +206,7 @@ On failure:
 - [x] Verify job state and replay identifiers survive a normal broker restart, and that the control-plane UID cannot read the database (PR #91).
 - [x] Test abrupt broker-process termination after a committed request, stale-socket recovery, normal restart, persisted job state, and replay rejection (Stage 1 crash-recovery test batch).
 - [x] Reject a corrupt SQLite database at startup and inject a mid-submit ledger failure to verify transaction rollback leaves no job or replay record.
+- [x] Kill the broker after a committed request, restart against the same database, verify stale-socket recovery, persisted job state, and replay rejection; reject corrupt state and test rollback after injected mid-submit failure (PR #93; CI #349 passed).
 - [ ] Test recovery during an active commit/power loss, disk-full behavior, backup/restore, retention, and cleanup failure.
 - [ ] Define and validate permanent host provisioning, systemd service lifecycle, operational logging, and restart/cleanup ownership; no permanent service accounts are installed by this project.
 - [ ] Add protocol fuzzing and independent approval-signature/tampering tests; approval IDs are replay identifiers, not proof of human consent.
