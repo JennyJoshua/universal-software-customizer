@@ -279,3 +279,33 @@ def test_group_socket_mode_requires_durable_state_database(tmp_path):
     socket_dir.chmod(0o2710)
     with pytest.raises(ValueError, match="durable runner state database"):
         LocalRunnerBroker(socket_dir / "runner.sock", socket_gid=os.getgid()).start()
+
+
+
+def test_broker_submit_transaction_rolls_back_job_if_replay_record_fails(tmp_path, monkeypatch):
+    socket_dir = tmp_path / "socket"
+    socket_dir.mkdir(mode=0o700)
+    socket_dir.chmod(0o700)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(mode=0o700)
+    state_dir.chmod(0o700)
+    broker = LocalRunnerBroker(
+        socket_dir / "runner.sock",
+        submitter_uids={os.getuid()},
+        state_db_path=state_dir / "broker.sqlite3",
+    )
+    broker.start()
+    message = submit_message()
+
+    def fail_record(_request_id):
+        raise RuntimeError("injected replay-ledger write failure")
+
+    monkeypatch.setattr(broker._state, "record_request", fail_record)
+    try:
+        with pytest.raises(RuntimeError, match="injected"):
+            broker._dispatch(os.getuid(), message)
+        assert broker._state.job_count() == 0
+        assert not broker._state.approval_seen(message["job"]["approval_id"])
+        assert not broker._state.request_seen(message["request_id"])
+    finally:
+        broker.close()
