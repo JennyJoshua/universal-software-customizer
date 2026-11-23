@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -191,8 +190,9 @@ def test_runner_service_identity_is_separated_from_control_plane():
 
         # Kill the broker without graceful cleanup, then verify stale-socket
         # recovery and durable job/replay state after a fresh process starts.
-        os.killpg(broker_process.pid, signal.SIGKILL)
+        _sudo("pkill", "-KILL", "-u", runner, check=False)
         broker_process.wait(timeout=5)
+        assert _sudo("pgrep", "-u", runner, check=False).returncode != 0
         broker_process = None
 
         broker_process = start_broker()
@@ -229,14 +229,12 @@ def test_runner_service_identity_is_separated_from_control_plane():
 
     finally:
         if broker_process is not None and broker_process.poll() is None:
+            _sudo("pkill", "-KILL", "-u", runner, check=False)
             try:
-                os.killpg(broker_process.pid, signal.SIGTERM)
                 broker_process.wait(timeout=5)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
-                try:
-                    os.killpg(broker_process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+            except subprocess.TimeoutExpired:
+                broker_process.kill()
+                broker_process.wait(timeout=5)
         _sudo("rm", "-rf", base, check=False)
         for username in reversed(created_users):
             _sudo("userdel", username, check=False)
