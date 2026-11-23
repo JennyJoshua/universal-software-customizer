@@ -209,10 +209,10 @@ def test_cli_build_run_consumes_receipt_and_calls_only_approved_profile(tmp_path
     captured = {}
 
     def fake_runner(source_path, output_path, **kwargs):
-        captured.update({"source": source_path, "output": output_path, **kwargs})
+        captured.update({"source_path": source_path, "output_path": output_path, **kwargs})
         return {"status": "passed", "operation": "isolated_build", "executed": True}
 
-    monkeypatch.setattr("customizer.cli.run_isolated_build", fake_runner)
+    monkeypatch.setattr("customizer.build_runner._run_isolated_build", fake_runner)
     report_path = tmp_path / "evidence.json"
     assert main([
         "build-run", "--approval", str(receipt_path), "--path", str(source),
@@ -220,6 +220,8 @@ def test_cli_build_run_consumes_receipt_and_calls_only_approved_profile(tmp_path
     ]) == 0
     assert captured["command"] == ["python", "-m", "pytest", "-q"]
     assert captured["approved"] is True
+    assert captured["source_path"] == str(source.resolve())
+    assert captured["output_path"] == str(output.resolve())
     assert json.loads(report_path.read_text(encoding="utf-8"))["status"] == "passed"
 
     with pytest.raises(ValueError, match="already been used"):
@@ -265,3 +267,70 @@ def test_nonempty_artifact_directory_does_not_consume_approval(tmp_path):
         receipt_path, source_path=source, output_path=output, state_dir=state,
     )
     assert result["approval_id"] == receipt["request"]["approval_id"]
+
+
+
+def test_supported_execution_api_requires_a_valid_consumable_receipt(tmp_path, monkeypatch):
+    from customizer.build_approval import execute_approved_build
+
+    source = tmp_path / "source"
+    _git_source(source)
+    output = tmp_path / "artifacts"
+    output.mkdir()
+    invalid_receipt = tmp_path / "invalid-receipt.json"
+    invalid_receipt.write_text("{}", encoding="utf-8")
+    called = {"value": False}
+
+    def forbidden_runner(*args, **kwargs):
+        called["value"] = True
+        raise AssertionError("Low-level runner must not be reached for an invalid receipt.")
+
+    monkeypatch.setattr("customizer.build_runner._run_isolated_build", forbidden_runner)
+    with pytest.raises(ValueError, match="invalid structure"):
+        execute_approved_build(
+            invalid_receipt, source_path=source, output_path=output,
+            state_dir=_state(tmp_path),
+        )
+    assert called["value"] is False
+
+
+def test_supported_execution_api_consumes_receipt_before_runner(tmp_path, monkeypatch):
+    from customizer.build_approval import execute_approved_build
+
+    source = tmp_path / "source"
+    _git_source(source)
+    request_path, _ = _request(tmp_path, source)
+    state = _state(tmp_path)
+    receipt = approve_build_request(request_path, approved=True, state_dir=state)
+    receipt_path = tmp_path / "receipt.json"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    output = tmp_path / "artifacts"
+    output.mkdir()
+    captured = {}
+
+    def fake_runner(source_path, output_path, **kwargs):
+        captured.update({"source": source_path, "output": output_path, **kwargs})
+        return {"status": "passed", "operation": "isolated_build", "executed": True}
+
+    monkeypatch.setattr("customizer.build_runner._run_isolated_build", fake_runner)
+    result = execute_approved_build(
+        receipt_path, source_path=source, output_path=output, state_dir=state,
+    )
+    assert result["status"] == "passed"
+    assert captured["command"] == ["python", "-m", "pytest", "-q"]
+    assert captured["approved"] is True
+    with pytest.raises(ValueError, match="already been used"):
+        execute_approved_build(
+            receipt_path, source_path=source, output_path=output, state_dir=state,
+        )
+
+
+
+def test_low_level_runner_is_not_exported_under_its_old_public_name():
+    import customizer.build_runner as runner
+    import customizer.cli as cli
+
+    assert not hasattr(runner, "run_isolated_build")
+    assert hasattr(runner, "_run_isolated_build")
+    assert not hasattr(cli, "run_isolated_build")
+    assert hasattr(cli, "execute_approved_build")

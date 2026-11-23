@@ -112,7 +112,11 @@ This procedure is an operational control, not a guarantee that an image is benig
 
 ## Low-level Python API boundary
 
-The Python function `customizer.build_runner.run_isolated_build` is a low-level internal interface. Its `approved=True` argument is not a substitute for the reviewed CLI receipt workflow and can bypass that workflow when called directly by application code. Normal build requests must use `usc build-request`, `usc build-approve`, and `usc build-run` as described above. Do not expose the low-level function directly to untrusted callers.
+The supported Python execution entry point is `customizer.build_approval.execute_approved_build`. It authenticates and consumes the supplied one-time receipt, rechecks the exact source identity and approved profile, and only then invokes the runner. The CLI uses this same entry point; it no longer imports or calls the runner directly.
+
+The Docker execution primitive has been renamed to `customizer.build_runner._run_isolated_build` and marked internal. It is not imported by the CLI or exposed as a supported package API. Application integrations must call `execute_approved_build` or the CLI workflow, never the internal primitive. Tests that exercise Docker mechanics import the internal function explicitly as a test-only seam.
+
+Python module privacy is a software-interface boundary, not a sandbox: code already executing as the same Python user can deliberately import underscore-prefixed internals, modify process state, or access the local HMAC key and replay ledger. The local receipt therefore protects supported workflows from accidental or ordinary API bypass, but it is not a remote authorization service or a defence against malicious same-user code. Any future web/API service must isolate build execution in a separate process or service account and accept only authenticated, scoped approval records; it must never expose a generic command-execution endpoint.
 
 Do not pass secrets in command arguments or source files. A mounted source tree is readable to the build process; the runner does not make arbitrary source contents confidential. The output tmpfs is limited to 256 MB and the temporary filesystem to 64 MB. Keep secrets out of fixture and candidate trees.
 

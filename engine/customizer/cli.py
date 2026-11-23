@@ -17,8 +17,7 @@ from .verification import create_sync_verification
 from .verification_snapshot import create_sync_verification_snapshot
 from .acceptance import accept_sync_candidate, recover_sync_acceptance
 from .candidate_discard import discard_sync_candidate
-from .build_approval import create_build_approval_request, approve_build_request, consume_build_approval, available_build_profiles
-from .build_runner import run_isolated_build
+from .build_approval import create_build_approval_request, approve_build_request, execute_approved_build, available_build_profiles
 from .source_inventory import create_source_review
 
 
@@ -233,14 +232,8 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("Build evidence report must be outside the source directory.")
                 if report_path == output_dir or output_dir in report_path.parents:
                     raise ValueError("Build evidence report must be outside the artifact directory.")
-            approved = consume_build_approval(
+            report = execute_approved_build(
                 args.approval, source_path=supplied_source, output_path=supplied_output,
-            )
-            report = run_isolated_build(
-                approved["source_path"], approved["output_path"],
-                image=approved["image"], command=approved["command"],
-                approved=True, timeout_seconds=approved["timeout_seconds"],
-                max_log_bytes=approved["max_log_bytes"],
             )
             _write_report(report, args.report, source_root)
             if report.get("status") != "passed":
