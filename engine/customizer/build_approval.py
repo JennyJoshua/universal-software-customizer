@@ -314,3 +314,37 @@ def consume_build_approval(
         "max_log_bytes": request["max_log_bytes"],
         "approval_id": approval_id,
     }
+
+
+def execute_approved_build(
+    receipt_path: str | Path,
+    *,
+    source_path: str | Path,
+    output_path: str | Path,
+    state_dir: str | Path | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """Consume a valid one-time receipt and execute only its fixed approved profile.
+
+    This is the supported build execution API. The low-level Docker runner is kept
+    private to the implementation module and is not imported by the CLI.
+    """
+    approved = consume_build_approval(
+        receipt_path,
+        source_path=source_path,
+        output_path=output_path,
+        state_dir=state_dir,
+        now=now,
+    )
+    # Local import avoids a module cycle: the runner's execution primitive is internal.
+    from .build_runner import _run_isolated_build
+
+    return _run_isolated_build(
+        approved["source_path"],
+        approved["output_path"],
+        image=approved["image"],
+        command=approved["command"],
+        approved=True,
+        timeout_seconds=approved["timeout_seconds"],
+        max_log_bytes=approved["max_log_bytes"],
+    )
