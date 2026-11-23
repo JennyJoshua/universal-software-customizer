@@ -100,10 +100,10 @@ class LocalRunnerBroker:
             raise ProtocolError("Socket path must not be a symlink.")
         if self.socket_path.exists():
             existing = self.socket_path.stat(follow_symlinks=False)
-            expected_gid = os.getgid() if self.socket_gid is None else self.socket_gid
             expected_mode = 0o600 if self.socket_gid is None else 0o660
+            wrong_group = self.socket_gid is not None and existing.st_gid != self.socket_gid
             if (not stat.S_ISSOCK(existing.st_mode) or existing.st_uid != os.getuid()
-                    or existing.st_gid != expected_gid or stat.S_IMODE(existing.st_mode) != expected_mode):
+                    or wrong_group or stat.S_IMODE(existing.st_mode) != expected_mode):
                 raise ProtocolError("Refusing to replace a non-owned or incorrectly permissioned socket path.")
             probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
@@ -121,9 +121,9 @@ class LocalRunnerBroker:
             socket_mode = 0o600 if self.socket_gid is None else 0o660
             os.chmod(self.socket_path, socket_mode)
             socket_info = self.socket_path.stat(follow_symlinks=False)
-            expected_gid = os.getgid() if self.socket_gid is None else self.socket_gid
+            wrong_group = self.socket_gid is not None and socket_info.st_gid != self.socket_gid
             if (not stat.S_ISSOCK(socket_info.st_mode) or socket_info.st_uid != os.getuid()
-                    or socket_info.st_gid != expected_gid or stat.S_IMODE(socket_info.st_mode) != socket_mode):
+                    or wrong_group or stat.S_IMODE(socket_info.st_mode) != socket_mode):
                 raise ProtocolError("Socket permissions or ownership do not match the configured access policy.")
             listener.listen(8)
             listener.settimeout(0.2)
