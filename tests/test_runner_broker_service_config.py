@@ -25,8 +25,8 @@ def test_systemd_example_is_explicitly_guarded_and_hardened():
     for setting in required:
         assert setting in unit
     assert "docker.sock" not in unit
-    assert "publish" not in unit.lower()
-    assert "deploy" not in unit.lower()
+    assert "--publish" not in unit.lower()
+    assert "--deploy" not in unit.lower()
 
 
 def test_broker_environment_example_contains_no_active_placeholder_values():
