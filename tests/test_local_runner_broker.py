@@ -223,3 +223,37 @@ def test_broker_removes_only_a_stale_owned_socket(tmp_path):
         assert stat.S_ISSOCK(socket_path.stat(follow_symlinks=False).st_mode)
     finally:
         broker.close()
+
+
+
+def test_broker_supports_preprovisioned_group_socket_mode(tmp_path):
+    socket_dir = tmp_path / "group-socket"
+    socket_dir.mkdir(mode=0o700)
+    socket_dir.chmod(0o2710)
+    broker = LocalRunnerBroker(
+        socket_dir / "runner.sock",
+        submitter_uids={os.getuid()},
+        socket_gid=os.getgid(),
+    )
+    broker.start()
+    try:
+        directory = socket_dir.stat()
+        endpoint = broker.socket_path.stat(follow_symlinks=False)
+        assert stat.S_IMODE(directory.st_mode) == 0o2710
+        assert directory.st_gid == os.getgid()
+        assert stat.S_IMODE(endpoint.st_mode) == 0o660
+        assert endpoint.st_gid == os.getgid()
+    finally:
+        broker.close()
+
+
+def test_broker_group_socket_mode_requires_preprovisioned_private_directory(tmp_path):
+    missing = tmp_path / "not-created"
+    with pytest.raises(ValueError, match="pre-provisioned"):
+        LocalRunnerBroker(missing / "runner.sock", socket_gid=os.getgid()).start()
+
+    open_dir = tmp_path / "open-group"
+    open_dir.mkdir(mode=0o700)
+    open_dir.chmod(0o750)
+    with pytest.raises(ValueError, match="2710"):
+        LocalRunnerBroker(open_dir / "runner.sock", socket_gid=os.getgid()).start()
