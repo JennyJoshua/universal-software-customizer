@@ -56,8 +56,11 @@ def _send_response(connection, value):
 class LocalRunnerBroker:
     """Single-threaded test broker with a private socket and in-memory job registry."""
 
-    def __init__(self, socket_path, *, submitter_uids=frozenset(), operator_uids=frozenset()):
+    def __init__(self, socket_path, *, submitter_uids=frozenset(), operator_uids=frozenset(), socket_gid=None):
         self.socket_path = Path(socket_path).expanduser()
+        if isinstance(socket_gid, bool) or (socket_gid is not None and (not isinstance(socket_gid, int) or socket_gid <= 0)):
+            raise ValueError("socket_gid must be a positive group ID.")
+        self.socket_gid = socket_gid
         self.submitter_uids = frozenset(submitter_uids)
         self.operator_uids = frozenset(operator_uids)
         self._listener = None
@@ -74,7 +77,10 @@ class LocalRunnerBroker:
         parent = self.socket_path.parent
         if parent.is_symlink():
             raise ProtocolError("Socket directory must not be a symlink.")
-        parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self.socket_gid is None:
+            parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        elif not parent.is_dir():
+            raise ProtocolError("Group-access socket directory must be pre-provisioned by an administrator.")
         parent = parent.resolve(strict=True)
         if self.socket_path.name in {"", ".", ".."}:
             raise ProtocolError("Socket filename is invalid.")
@@ -82,14 +88,23 @@ class LocalRunnerBroker:
         if len(os.fsencode(self.socket_path)) > 100:
             raise ProtocolError("Unix socket path exceeds the supported length.")
         info = parent.stat(follow_symlinks=False)
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
-            raise ProtocolError("Socket directory must be current-user-owned and private (0700).")
+        directory_mode = stat.S_IMODE(info.st_mode)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+            raise ProtocolError("Socket directory must be owned by the broker service UID.")
+        if self.socket_gid is None:
+            if directory_mode != 0o700:
+                raise ProtocolError("Socket directory must be private (0700).")
+        elif info.st_gid != self.socket_gid or directory_mode != 0o2710:
+            raise ProtocolError("Group socket directory must be broker-owned, setgid, group-traversable only (2710), and use the configured client group.")
         if self.socket_path.is_symlink():
             raise ProtocolError("Socket path must not be a symlink.")
         if self.socket_path.exists():
             existing = self.socket_path.stat(follow_symlinks=False)
-            if not stat.S_ISSOCK(existing.st_mode) or existing.st_uid != os.getuid():
-                raise ProtocolError("Refusing to replace a non-owned or non-socket path.")
+            expected_gid = os.getgid() if self.socket_gid is None else self.socket_gid
+            expected_mode = 0o600 if self.socket_gid is None else 0o660
+            if (not stat.S_ISSOCK(existing.st_mode) or existing.st_uid != os.getuid()
+                    or existing.st_gid != expected_gid or stat.S_IMODE(existing.st_mode) != expected_mode):
+                raise ProtocolError("Refusing to replace a non-owned or incorrectly permissioned socket path.")
             probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
                 connect_result = probe.connect_ex(str(self.socket_path))
@@ -103,10 +118,13 @@ class LocalRunnerBroker:
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             listener.bind(str(self.socket_path))
-            os.chmod(self.socket_path, 0o600)
+            socket_mode = 0o600 if self.socket_gid is None else 0o660
+            os.chmod(self.socket_path, socket_mode)
             socket_info = self.socket_path.stat(follow_symlinks=False)
-            if not stat.S_ISSOCK(socket_info.st_mode) or socket_info.st_uid != os.getuid() or stat.S_IMODE(socket_info.st_mode) != 0o600:
-                raise ProtocolError("Socket permissions or ownership are not private.")
+            expected_gid = os.getgid() if self.socket_gid is None else self.socket_gid
+            if (not stat.S_ISSOCK(socket_info.st_mode) or socket_info.st_uid != os.getuid()
+                    or socket_info.st_gid != expected_gid or stat.S_IMODE(socket_info.st_mode) != socket_mode):
+                raise ProtocolError("Socket permissions or ownership do not match the configured access policy.")
             listener.listen(8)
             listener.settimeout(0.2)
         except Exception:
