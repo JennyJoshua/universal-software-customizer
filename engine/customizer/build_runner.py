@@ -571,7 +571,7 @@ def _cleanup_labelled_containers(docker: str, label: str) -> bool:
     return remaining == []
 
 
-def run_isolated_build(
+def _run_isolated_build(
     source_path: str | Path,
     output_path: str | Path,
     *,
@@ -581,10 +581,12 @@ def run_isolated_build(
     timeout_seconds: int = 300,
     max_log_bytes: int = 262_144,
 ) -> dict:
-    """Run an explicitly approved argv command in a network-disabled, read-only container.
+    """Internal execution primitive. Use build_approval.execute_approved_build instead.
 
     The image must already exist locally and be pinned by digest. No host environment
     variables, credentials, sockets, or additional mounts are passed to the container.
+    The leading underscore marks this as an unsupported internal interface, not a
+    security boundary against hostile code running as the same Python user.
     """
     if approved is not True:
         return _validated_result({
