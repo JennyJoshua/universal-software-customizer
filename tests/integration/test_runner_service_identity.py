@@ -78,7 +78,6 @@ def test_runner_service_identity_is_separated_from_control_plane():
 
         runner_uid = _uid(runner)
         client_uid = _uid(client)
-        outsider_uid = _uid(outsider)
         group_gid = int(_sudo("getent", "group", group).stdout.strip().split(":")[2])
 
         _sudo("chmod", "0755", base)
@@ -86,7 +85,7 @@ def test_runner_service_identity_is_separated_from_control_plane():
         state_dir = os.path.join(base, "state")
         key_path = os.path.join(state_dir, "approval.key")
         _sudo("install", "-d", "-o", runner, "-g", group, "-m", "2710", socket_dir)
-        _sudo("install", "-d", "-o", runner, "-g", runner, "-m", "0700", state_dir)
+        _sudo("install", "-d", "-o", runner, "-g", group, "-m", "0700", state_dir)
         _sudo(
             "-u", runner, "--", "python3", "-c",
             "import os,sys; fd=os.open(sys.argv[1], os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600); os.write(fd,b'synthetic-fixture-only'); os.close(fd)",
