@@ -1,41 +1,52 @@
 # Stage 1 — local runner separation prototype
 
-**Status:** protocol contract and test-only local socket broker implemented  
-**Scope:** synthetic metadata requests and in-memory job state. No build execution.
+**Status:** protocol, test-only Unix socket broker, and ephemeral separate-identity tests implemented  
+**Scope:** synthetic metadata requests and broker-owned state only. No build execution.
 
-## Batch 1 — strict protocol contract
+## Batch 1 — strict protocol contract (PR #87; CI #319)
 
-- A bounded UTF-8 JSON message contract with duplicate-key rejection and a 16 KiB ceiling.
+- Bounded UTF-8 JSON messages with duplicate-key rejection and a 16 KiB ceiling.
 - Exact field sets and protocol-version checks; unknown fields fail closed.
 - Only four operations: `submit`, `status`, `cancel`, and `result`.
 - Submit carries a content digest, fixed profile ID, digest-pinned build/exporter images, policy version, expiry, and an explicit no-release flag.
-- The message cannot carry shell commands, Docker flags, host paths, environment variables, output destinations, registry credentials, or publish/deploy instructions.
-- Status, cancel, and result identify a job but do not authorize access to it.
-- CI #319 passed after malformed-type and non-standard JSON regression tests were added.
+- No shell commands, Docker flags, host paths, environment variables, output destinations, registry credentials, or publish/deploy instructions are accepted.
 
-## Batch 2 — local Unix-domain socket broker
+## Batch 2 — local Unix-domain socket broker (PR #88; CI #330)
 
-- A test-only broker and client communicate over a Unix-domain stream socket.
-- The broker requires a current-user-owned private directory (0700) and creates a current-user-owned socket (0600).
-- Linux `SO_PEERCRED` supplies the connecting UID; platforms without kernel peer credentials fail closed.
-- Separate submitter/operator UID allowlists are applied; status, cancel, and result are checked against the job owner or an operator on every request.
-- Duplicate request IDs and approval IDs are rejected during the broker process lifetime.
-- The in-memory registry accepts synthetic jobs, reports status, marks queued jobs cancelled, and reports no result artifacts.
+- Test-only broker/client over a Unix-domain stream socket; Linux `SO_PEERCRED` supplies the connecting UID.
+- Private development mode uses a service-owned 0700 directory and 0600 socket.
+- Group mode uses an administrator-preprovisioned service-owned 2710 directory and 0660 socket; the group permits connection but does not grant authorization.
+- Separate submitter/operator UID allowlists and per-operation job-owner checks.
+- Duplicate request and approval IDs are rejected; message sizes, connections, jobs, and requests are bounded.
+- Unknown-job and unauthorized-job responses are deliberately indistinguishable.
+- No Docker, shell execution, source transfer, or artifact export.
+
+## Batch 3 — separate OS identities (PR #89; CI #338)
+
+- An ephemeral Linux CI test creates temporary runner, client, and unauthorized-client accounts and a dedicated group.
+- The broker runs under the runner UID; the control-plane UID connects through the group socket but cannot list the socket directory or read runner-private fixture state.
+- A different UID in the same group is denied by kernel peer-UID policy.
+- The test verifies runner/client accounts are not in the Docker group and cannot read a Docker socket when present.
+- Temporary accounts, groups, and fixtures are removed after the test; no permanent host accounts are provisioned.
+
+## Batch 4 — durable broker-owned replay state (in progress)
+
+- Group-access mode now requires a SQLite database in a runner-owned 0700 directory; the database must be a single-link runner-owned regular file with mode 0600.
+- SQLite uses explicit write transactions, unique request/approval IDs, full synchronous commits, rollback journaling, schema versioning, and a startup integrity check.
+- Job state and replay identifiers survive normal broker restarts; the control-plane identity cannot read the database in the ephemeral CI fixture.
+- The private same-user development mode may still run in memory unless a database path is supplied.
 
 ## What this prototype does not establish
 
-- The broker still runs as the current user. It does **not** create separate control-plane and runner OS accounts, group provisioning, or a protected runner identity.
-- The peer UID is trustworthy only because the socket adapter reads it from the kernel; callers cannot supply it in JSON.
-- Job and replay state are in memory and disappear on restart. This is not durable replay protection or crash recovery.
-- The broker does not verify an independently signed approval or prove human consent.
+- The broker does not verify an independently signed approval or prove human consent; an approval ID is only a replay identifier at this stage.
+- SQLite recovery under abrupt power loss, disk-full conditions, corruption, backup/restore, retention, and long-duration stress still require testing.
+- Permanent OS users/groups, a systemd unit, host provisioning, and production service lifecycle are not installed.
 - No Docker daemon is contacted, no command is run, no source path is opened or transferred, and no artifact is produced.
-- Same-host process separation does not protect against host root or a privileged administrator.
-
-See [the broker deployment and permission limitations](local-runner-broker-prototype.md) before considering a separate service identity.
+- Same-host process/account separation does not protect against host root, kernel compromise, or a privileged administrator.
 
 ## Next Stage 1 gates
 
-1. Review and implement a dedicated service UID/group and filesystem ownership model without granting the control plane access to runner keys, replay state, workspace, or Docker authority.
-2. Define crash-safe, broker-owned persistent job/replay state and retention before implementing persistence.
-3. Add service lifecycle, crash/restart, malformed-stream, duplicate-operation, and cleanup-failure coverage.
-4. Keep Docker and the existing build runner disconnected until the independent service identity and approval model have been reviewed.
+1. Test abrupt process termination, SQLite recovery, corruption handling, capacity exhaustion, retention, and cleanup failure.
+2. Finalize administrator-run service UID/group provisioning, systemd lifecycle, logging, and cleanup documentation without enabling customer execution.
+3. Add protocol fuzzing and independent approval-signature verification before treating approvals as external consent.
+4. Obtain independent security review before any customer-source pilot; customer repositories remain disabled.
