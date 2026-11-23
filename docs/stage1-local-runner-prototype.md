@@ -51,3 +51,13 @@
 2. Finalize administrator-run service UID/group provisioning, systemd lifecycle, logging, and cleanup documentation without enabling customer execution.
 3. Add protocol fuzzing and independent approval-signature verification before treating approvals as external consent.
 4. Obtain independent security review before any customer-source pilot; customer repositories remain disabled.
+
+
+## Batch 6 — service lifecycle and host configuration examples (in progress)
+
+- Adds a foreground `usc-runner-broker` CLI entry point with fixed socket/state/UID arguments only; it exposes no shell or build command.
+- SIGTERM/SIGINT stop new accepts, allow an active request to finish, close SQLite, and remove the socket.
+- Adds a guarded, hardened systemd example and a host-provisioning runbook. The example requires an explicit `ENABLE_SYNTHETIC_ONLY` marker and uses `Restart=no`.
+- CI checks the service configuration and exercises graceful shutdown using temporary service accounts.
+- No permanent users/groups are created by the repository, and no unit is installed, enabled, or started on a real host.
+

@@ -1,0 +1,51 @@
+# Prototype only. Do not install or start without separate deployment approval.
+[Unit]
+Description=USC Synthetic-Only Local Runner Broker
+After=local-fs.target
+ConditionPathExists=/etc/usc-runner/ENABLE_SYNTHETIC_ONLY
+
+[Service]
+Type=simple
+User=usc-runner
+Group=usc-clients
+RuntimeDirectory=usc-runner
+RuntimeDirectoryMode=2710
+StateDirectory=usc-runner
+StateDirectoryMode=0700
+WorkingDirectory=/
+EnvironmentFile=/etc/usc-runner/broker.env
+ExecStart=/opt/usc/venv/bin/python -m customizer.local_runner_broker --socket /run/usc-runner/runner.sock --socket-gid ${USC_CLIENT_GID} --state-db /var/lib/usc-runner/broker.sqlite3 --submitter-uid ${USC_CONTROL_UID}
+Restart=no
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=10
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=usc-runner-broker
+
+NoNewPrivileges=true
+PrivateNetwork=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+ProtectProc=invisible
+ProcSubset=pid
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/run/usc-runner /var/lib/usc-runner
+
+[Install]
+WantedBy=multi-user.target

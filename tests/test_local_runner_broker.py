@@ -309,3 +309,22 @@ def test_broker_submit_transaction_rolls_back_job_if_replay_record_fails(tmp_pat
         assert not broker._state.request_seen(message["request_id"])
     finally:
         broker.close()
+
+
+
+def test_request_stop_finishes_accept_loop_before_close_removes_socket(tmp_path):
+    socket_dir = tmp_path / "socket"
+    socket_dir.mkdir(mode=0o700)
+    socket_dir.chmod(0o700)
+    broker = LocalRunnerBroker(socket_dir / "runner.sock", submitter_uids={os.getuid()})
+    broker.start()
+    thread = threading.Thread(target=broker.serve_forever, daemon=True)
+    thread.start()
+    broker.request_stop()
+    thread.join(timeout=2)
+    try:
+        assert not thread.is_alive()
+        assert broker.socket_path.exists()
+    finally:
+        broker.close()
+    assert not broker.socket_path.exists()

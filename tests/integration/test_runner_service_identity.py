@@ -115,12 +115,6 @@ def test_runner_service_identity_is_separated_from_control_plane():
         _sudo("chmod", "-R", "a+rX", python_root)
         repo_engine = python_root
         state_db_path = os.path.join(state_dir, "broker.sqlite3")
-        server_code = (
-            "import sys; from customizer.local_runner_broker import LocalRunnerBroker; "
-            "b=LocalRunnerBroker(sys.argv[1], submitter_uids={int(sys.argv[2])}, "
-            "socket_gid=int(sys.argv[3]), state_db_path=sys.argv[4]); "
-            "b.start(); print('READY', flush=True); b.serve_forever()"
-        )
         client_code = (
             "import json,sys; from customizer.local_runner_broker import send_local_request; "
             "print(json.dumps(send_local_request(sys.argv[1], json.loads(sys.argv[2]))))"
@@ -129,7 +123,9 @@ def test_runner_service_identity_is_separated_from_control_plane():
         def start_broker():
             return subprocess.Popen(
                 ["sudo", "-n", "-u", runner, "--", "env", f"PYTHONPATH={repo_engine}",
-                 "python3", "-c", server_code, socket_path, str(client_uid), str(group_gid), state_db_path],
+                 "python3", "-m", "customizer.local_runner_broker",
+                 "--socket", socket_path, "--socket-gid", str(group_gid),
+                 "--state-db", state_db_path, "--submitter-uid", str(client_uid)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -226,6 +222,13 @@ def test_runner_service_identity_is_separated_from_control_plane():
             socket_path, json.dumps(replayed_approval),
         )
         assert "already been submitted" in json.loads(replayed_approval_result.stdout.strip())["error"]
+
+        # Exercise the real CLI's graceful SIGTERM path: it stops accepting,
+        # closes SQLite, and removes the socket after the active request ends.
+        _sudo("pkill", "-TERM", "-u", runner, check=False)
+        broker_process.wait(timeout=5)
+        broker_process = None
+        assert _sudo("test", "-S", socket_path, check=False).returncode != 0
 
     finally:
         if broker_process is not None and broker_process.poll() is None:

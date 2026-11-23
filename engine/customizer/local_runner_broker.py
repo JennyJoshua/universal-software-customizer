@@ -5,10 +5,13 @@ reads source paths, or exports files. Group-access mode requires a private,
 broker-owned SQLite state database for durable replay protection.
 """
 from __future__ import annotations
+import argparse
 import errno
 import json
 import os
+import signal
 import socket
+import sys
 import stat
 import struct
 import threading
@@ -222,8 +225,17 @@ class LocalRunnerBroker:
             self._state.record_request(request_id)
             return result
 
-    def close(self):
+    def request_stop(self):
+        """Stop accepting new connections; let any active request finish."""
         self._stop.set()
+        if self._listener is not None:
+            try:
+                self._listener.close()
+            except OSError:
+                pass
+
+    def close(self):
+        self.request_stop()
         if self._listener is not None:
             self._listener.close()
             self._listener = None
@@ -263,3 +275,52 @@ def send_local_request(socket_path, message, *, timeout=2.0):
     if not isinstance(response, dict) or not isinstance(response.get("ok"), bool):
         raise ProtocolError("Broker response has an invalid structure.")
     return response
+
+
+
+def _positive_int(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("value must be a positive integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be a positive integer")
+    return parsed
+
+
+def main(argv=None):
+    """Run the synthetic-only local broker as a foreground service process."""
+    parser = argparse.ArgumentParser(description="USC synthetic-only local runner broker")
+    parser.add_argument("--socket", required=True, help="Unix-domain socket path")
+    parser.add_argument("--socket-gid", type=_positive_int, help="Pre-provisioned client group ID")
+    parser.add_argument("--state-db", help="Absolute path to the broker-private SQLite state database")
+    parser.add_argument("--submitter-uid", type=_positive_int, action="append", default=[])
+    parser.add_argument("--operator-uid", type=_positive_int, action="append", default=[])
+    args = parser.parse_args(argv)
+
+    broker = LocalRunnerBroker(
+        args.socket,
+        submitter_uids=set(args.submitter_uid),
+        operator_uids=set(args.operator_uid),
+        socket_gid=args.socket_gid,
+        state_db_path=args.state_db,
+    )
+
+    def _stop_handler(_signum, _frame):
+        broker.request_stop()
+
+    signal.signal(signal.SIGTERM, _stop_handler)
+    signal.signal(signal.SIGINT, _stop_handler)
+    try:
+        broker.start()
+        broker.serve_forever()
+    except (ProtocolError, OSError, ValueError) as exc:
+        print(f"usc-runner-broker: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        broker.close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
