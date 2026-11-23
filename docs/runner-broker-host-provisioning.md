@@ -53,8 +53,9 @@ No command in this repository or CI performs these host changes.
 
 ## Lifecycle and operations
 
+- The broker can run in the foreground as `python -m customizer.local_runner_broker` or through the installed `usc-runner-broker` entry point. Both accept only the fixed socket, state database, submitter UID, and operator UID settings; neither exposes a shell or build command.
 - The sample unit uses `Restart=no`: after an unexpected exit, inspect the journal and state database before manually restarting.
-- A graceful SIGTERM stops accepting new connections, allows the current request to finish, closes SQLite, and removes the socket.
+- A graceful SIGTERM stops accepting new connections, allows the current request to finish, closes SQLite, and removes the socket. The CLI installs this signal handler; the ephemeral CI integration test exercises it.
 - After SIGKILL, the socket path may remain stale; the broker checks whether it is live before removing an owned stale socket.
 - SQLite retains committed job and replay records across normal restarts. Power-loss/active-commit, disk-full, backup/restore, and retention behavior remain open tests.
 - Review `journalctl -u usc-runner-broker` for startup/shutdown errors. Do not log request contents, credentials, or source material.
