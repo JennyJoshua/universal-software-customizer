@@ -4,6 +4,7 @@ Accepts validated synthetic metadata and maintains in-memory state only.
 It never starts Docker, runs commands, reads source paths, or exports files.
 """
 from __future__ import annotations
+import errno
 import json
 import os
 import socket
@@ -85,6 +86,15 @@ class LocalRunnerBroker:
             existing = self.socket_path.stat(follow_symlinks=False)
             if not stat.S_ISSOCK(existing.st_mode) or existing.st_uid != os.getuid():
                 raise ProtocolError("Refusing to replace a non-owned or non-socket path.")
+            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                connect_result = probe.connect_ex(str(self.socket_path))
+            finally:
+                probe.close()
+            if connect_result == 0:
+                raise ProtocolError("A runner broker is already listening on this socket.")
+            if connect_result not in {errno.ECONNREFUSED, errno.ENOENT}:
+                raise ProtocolError("Could not safely determine whether the existing socket is stale.")
             self.socket_path.unlink()
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
