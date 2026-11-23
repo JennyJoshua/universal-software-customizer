@@ -141,6 +141,7 @@ def authorize_peer(
     *,
     operation: str,
     job_owner_uid: int | None = None,
+    submitter_uids: AbstractSet[int] = frozenset(),
     operator_uids: AbstractSet[int] = frozenset(),
 ) -> None:
     """Authorize a peer UID obtained from the transport for this one operation.
@@ -151,7 +152,7 @@ def authorize_peer(
     if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid <= 0:
         raise ProtocolError("Peer identity is invalid or privileged.")
     if operation == "submit":
-        if peer_uid in operator_uids:
+        if peer_uid in submitter_uids or peer_uid in operator_uids:
             return
         raise ProtocolError("Peer is not authorized to submit runner jobs.")
     if not isinstance(operation, str) or operation not in _JOB_OPERATIONS:
