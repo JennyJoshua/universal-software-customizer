@@ -52,7 +52,7 @@ class LocalRunnerBroker:
     """Single-threaded test broker with a private socket and in-memory job registry."""
 
     def __init__(self, socket_path, *, submitter_uids=frozenset(), operator_uids=frozenset()):
-        self.socket_path = Path(socket_path)
+        self.socket_path = Path(socket_path).expanduser()
         self.submitter_uids = frozenset(submitter_uids)
         self.operator_uids = frozenset(operator_uids)
         self._listener = None
@@ -64,10 +64,18 @@ class LocalRunnerBroker:
     def start(self):
         if self._listener is not None:
             raise RuntimeError("Broker is already started.")
+        if os.getuid() == 0:
+            raise ProtocolError("The local runner broker must not run as root.")
         parent = self.socket_path.parent
         if parent.is_symlink():
             raise ProtocolError("Socket directory must not be a symlink.")
         parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        parent = parent.resolve(strict=True)
+        if self.socket_path.name in {"", ".", ".."}:
+            raise ProtocolError("Socket filename is invalid.")
+        self.socket_path = parent / self.socket_path.name
+        if len(os.fsencode(self.socket_path)) > 100:
+            raise ProtocolError("Unix socket path exceeds the supported length.")
         info = parent.stat(follow_symlinks=False)
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
             raise ProtocolError("Socket directory must be current-user-owned and private (0700).")
@@ -110,6 +118,7 @@ class LocalRunnerBroker:
                     break
                 raise
             with connection:
+                connection.settimeout(CONNECTION_TIMEOUT_SECONDS)
                 try:
                     uid = _peer_uid(connection)
                     message = decode_message(_read_request(connection))
@@ -123,11 +132,15 @@ class LocalRunnerBroker:
     def _dispatch(self, peer_uid, message):
         operation = message["operation"]
         request_id = message["request_id"]
-        if request_id in self._request_ids:
-            raise ProtocolError("Duplicate request ID.")
         if operation == "submit":
             authorize_peer(peer_uid, operation=operation,
                            submitter_uids=self.submitter_uids, operator_uids=self.operator_uids)
+            if request_id in self._request_ids:
+                raise ProtocolError("Duplicate request ID.")
+            if len(self._jobs) >= MAX_JOBS:
+                raise ProtocolError("Broker job capacity has been reached.")
+            if len(self._request_ids) >= MAX_REQUESTS:
+                raise ProtocolError("Broker request capacity has been reached.")
             job_data = message["job"]
             if job_data["approval_id"] in self._approval_ids:
                 raise ProtocolError("Approval ID has already been submitted.")
@@ -146,9 +159,16 @@ class LocalRunnerBroker:
         job_id = message["job_id"]
         job = self._jobs.get(job_id)
         if job is None:
-            raise ProtocolError("Unknown job.")
-        authorize_peer(peer_uid, operation=operation, job_owner_uid=job["owner_uid"],
-                       operator_uids=self.operator_uids)
+            raise ProtocolError("Unknown job or unauthorized operation.")
+        try:
+            authorize_peer(peer_uid, operation=operation, job_owner_uid=job["owner_uid"],
+                           operator_uids=self.operator_uids)
+        except ProtocolError as exc:
+            raise ProtocolError("Unknown job or unauthorized operation.") from exc
+        if request_id in self._request_ids:
+            raise ProtocolError("Duplicate request ID.")
+        if len(self._request_ids) >= MAX_REQUESTS:
+            raise ProtocolError("Broker request capacity has been reached.")
         if operation == "cancel":
             if job["state"] == "queued":
                 job["state"] = "cancelled"
