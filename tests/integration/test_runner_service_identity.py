@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -108,14 +109,15 @@ def test_runner_service_identity_is_separated_from_control_plane():
             assert _sudo("-u", client, "--", "test", "-r", docker_socket, check=False).returncode != 0
 
         socket_path = os.path.join(socket_dir, "runner.sock")
+        repo_engine = str(Path(__file__).resolve().parents[2] / "engine")
         server_code = (
             "import sys; from customizer.local_runner_broker import LocalRunnerBroker; "
             "b=LocalRunnerBroker(sys.argv[1], submitter_uids={int(sys.argv[2])}, socket_gid=int(sys.argv[3])); "
             "b.start(); print('READY', flush=True); b.serve_forever()"
         )
         broker_process = subprocess.Popen(
-            ["sudo", "-n", "-u", runner, "--", "python3", "-c", server_code,
-             socket_path, str(client_uid), str(group_gid)],
+            ["sudo", "-n", "-u", runner, "--", "env", f"PYTHONPATH={repo_engine}",
+             "python3", "-c", server_code, socket_path, str(client_uid), str(group_gid)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
@@ -142,7 +144,7 @@ def test_runner_service_identity_is_separated_from_control_plane():
             "print(json.dumps(send_local_request(sys.argv[1], json.loads(sys.argv[2]))))"
         )
         submitted = _sudo(
-            "-u", client, "--", "python3", "-c", client_code,
+            "-u", client, "--", "env", f"PYTHONPATH={repo_engine}", "python3", "-c", client_code,
             socket_path, json.dumps(_submit_message()),
         )
         accepted = json.loads(submitted.stdout.strip())
@@ -151,7 +153,7 @@ def test_runner_service_identity_is_separated_from_control_plane():
 
         # A different UID in the socket group can connect, but peer-UID policy denies it.
         denied = _sudo(
-            "-u", outsider, "--", "python3", "-c", client_code,
+            "-u", outsider, "--", "env", f"PYTHONPATH={repo_engine}", "python3", "-c", client_code,
             socket_path, json.dumps(_submit_message()),
         )
         rejected = json.loads(denied.stdout.strip())
