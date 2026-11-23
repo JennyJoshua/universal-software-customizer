@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from customizer.build_runner import _probe_toolchain, _stage_source_snapshot, _toolchain_inventory_digest, run_isolated_build
+from customizer.build_runner import _probe_toolchain, _stage_source_snapshot, _toolchain_inventory_digest, _run_isolated_build as run_isolated_build
 
 
 IMAGE = "python:3.12-slim@sha256:" + "a" * 64
