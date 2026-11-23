@@ -15,7 +15,8 @@ The prototype broker:
 - Applies separate submitter and operator UID allowlists. Status, cancel, and result operations are checked against the job owner's UID or an operator UID for every request. Group membership permits connecting only; kernel-reported UID authorization remains mandatory.
 - Accepts only the strict protocol contract defined in `customizer.runner_protocol`.
 - Default private development mode may use in-memory state. Group-access mode requires a durable SQLite database in a service-owned 0700 directory; the database is service-owned mode 0600.
-- SQLite uses explicit transactions, a unique approval-ID constraint, a unique request-ID ledger, full synchronous commits, a rollback journal, and a startup integrity check. Job status and replay IDs survive broker restarts.
+- SQLite uses explicit transactions, a unique approval-ID constraint, a unique request-ID ledger, full synchronous commits, a rollback journal, schema versioning, and a startup integrity check. Job status and replay IDs survive normal restarts.
+- The ephemeral CI test kills the broker process after a committed job, restarts it against the same database, verifies stale-socket recovery, checks the job state, and confirms request/approval replays remain rejected.
 - Exposes status/cancel/result metadata only. It does not return artifacts.
 
 ## Service identity and permissions — important deployment limitation
@@ -37,7 +38,9 @@ The ephemeral CI test proves the fixture-level boundary only. It does not provis
 
 ## Security and functional limitations
 
-- In-memory private development mode loses jobs and replay IDs on restart. Group-access mode requires SQLite persistence, but power-loss recovery, corruption handling, backup/restore, retention, and long-duration stress still need dedicated testing.
+- In-memory private development mode loses jobs and replay IDs on restart.
+- SQLite corruption is rejected at startup, and an injected failure between job creation and replay-ledger insertion is tested for transaction rollback. These checks do not prove power-loss durability or recovery from a crash during an active commit.
+- Disk-full behavior, backup/restore, retention, and long-duration stress still need dedicated testing.
 - The broker does not verify a signed approval or independently authenticate a human approver.
 - A queued job is only a synthetic record. No process is started, no Docker daemon is contacted, no source path is opened, and no artifact is produced.
 - Cancellation only changes the synthetic queued state.
@@ -47,7 +50,7 @@ The ephemeral CI test proves the fixture-level boundary only. It does not provis
 
 ## Stage 1 next gates
 
-1. Review the durable-state implementation and ephemeral CI evidence; finalize administrator-run service UID/group provisioning and lifecycle documentation.
-2. Test abrupt process termination, SQLite recovery, database corruption, capacity exhaustion, retention, and cleanup failure.
+1. Review the abrupt-process-restart and corruption tests; add disk-full, backup/restore, retention, and cleanup-failure coverage.
+2. Finalize administrator-run service UID/group provisioning, systemd lifecycle, operational logging, and cleanup documentation.
 3. Add protocol fuzzing and independent approval-signature verification before treating approvals as external consent.
 4. Keep Docker and the existing build runner disconnected until the independent service identity and approval model have been reviewed.
