@@ -100,17 +100,18 @@ class LocalRunnerBroker:
             raise ProtocolError("Socket path must not be a symlink.")
         if self.socket_path.exists():
             existing = self.socket_path.stat(follow_symlinks=False)
-            expected_mode = 0o600 if self.socket_gid is None else 0o660
-            wrong_group = self.socket_gid is not None and existing.st_gid != self.socket_gid
-            if (not stat.S_ISSOCK(existing.st_mode) or existing.st_uid != os.getuid()
-                    or wrong_group or stat.S_IMODE(existing.st_mode) != expected_mode):
-                raise ProtocolError("Refusing to replace a non-owned or incorrectly permissioned socket path.")
+            if not stat.S_ISSOCK(existing.st_mode) or existing.st_uid != os.getuid():
+                raise ProtocolError("Refusing to replace a non-owned or non-socket path.")
             probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
                 connect_result = probe.connect_ex(str(self.socket_path))
             finally:
                 probe.close()
             if connect_result == 0:
+                expected_mode = 0o600 if self.socket_gid is None else 0o660
+                wrong_group = self.socket_gid is not None and existing.st_gid != self.socket_gid
+                if wrong_group or stat.S_IMODE(existing.st_mode) != expected_mode:
+                    raise ProtocolError("A live runner socket has unexpected permissions.")
                 raise ProtocolError("A runner broker is already listening on this socket.")
             if connect_result not in {errno.ECONNREFUSED, errno.ENOENT}:
                 raise ProtocolError("Could not safely determine whether the existing socket is stale.")
