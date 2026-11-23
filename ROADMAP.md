@@ -71,10 +71,10 @@
 - [x] Capture a fixed in-image toolchain inventory with bounded version output, per-probe isolation, and deterministic digest in build evidence and provenance (PR #63; CI #246 passed).
 - [x] Add a reviewed CLI approval workflow with short-lived HMAC-authenticated receipts, exact clean Git revision/image/profile binding, explicit review, fixed allowlisted argv, expiry, and one-time replay protection (PR #66; CI #256 passed). Initial profiles are `python-pytest` and synthetic-only `python-container-smoke`; local HMAC state is a guardrail, not external identity proof.
 - [x] Validate the runner against a live Docker 29.4.2 daemon using a synthetic clean Git fixture, digest-pinned Python build image, and pinned BusyBox exporter helper; verify non-root identity, network-disabled execution, read-only root/source, bounded tmpfs output, artifact export, and container/volume cleanup (trusted-main workflow runs #5 and #6). This is a runtime smoke test, not a container-escape penetration test.
-- [ ] Complete failure-injection coverage for remaining output-path/export races, helper startup, volume creation/removal, and interrupted export.
-- [ ] Keep artifacts detached from automatic public release; no automatic publishing or deployment is authorized.
+- [x] Complete failure-injection coverage for output-path/export races, helper startup, volume creation/removal, and interrupted export (PR #73; CI #279 and live Docker run #6 passed).
+- [x] Keep artifacts detached from automatic public release; provenance remains `release_authorized: false`, with no automatic publishing or deployment path.
 
-## Phase 7 — Additional adapters
+### Phase 6 acceptance gate\n\n- [ ] Complete a final acceptance audit against merged implementation, tests, live Docker evidence, and the threat boundaries documented in `docs/isolated-build-model.md`.\n- [ ] Keep customer repositories disabled until the separate security review explicitly authorizes a narrowly scoped pilot.\n\n## Phase 7 — Additional adapters
 
 - [ ] Prioritize based on real project demand.
 - [ ] Add one adapter at a time with fixtures and tests.
