@@ -79,27 +79,34 @@ def decode_message(raw: bytes | str, *, now: datetime | None = None) -> dict:
         except UnicodeDecodeError as exc:
             raise ProtocolError("Protocol message must be valid UTF-8.") from exc
     elif isinstance(raw, str):
-        if len(raw.encode("utf-8")) > MAX_MESSAGE_BYTES:
-            raise ProtocolError("Protocol message exceeds the byte limit.")
+        try:
+            if len(raw.encode("utf-8", errors="strict")) > MAX_MESSAGE_BYTES:
+                raise ProtocolError("Protocol message exceeds the byte limit.")
+        except UnicodeEncodeError as exc:
+            raise ProtocolError("Protocol message must be valid UTF-8 text.") from exc
     else:
         raise ProtocolError("Protocol message must be bytes or text.")
 
     try:
-        message = json.loads(raw, object_pairs_hook=_unique_object)
+        message = json.loads(
+            raw,
+            object_pairs_hook=_unique_object,
+            parse_constant=lambda _value: (_ for _ in ()).throw(ProtocolError("Non-standard JSON constants are not allowed.")),
+        )
     except ProtocolError:
         raise
-    except (json.JSONDecodeError, UnicodeError) as exc:
+    except (json.JSONDecodeError, UnicodeError, RecursionError) as exc:
         raise ProtocolError("Protocol message is not valid JSON.") from exc
 
     if not isinstance(message, dict):
         raise ProtocolError("Protocol message must be a JSON object.")
     if not _ENVELOPE.issubset(message):
         raise ProtocolError("Protocol envelope is incomplete.")
-    if message["protocol_version"] != PROTOCOL_VERSION:
+    if not isinstance(message["protocol_version"], str) or message["protocol_version"] != PROTOCOL_VERSION:
         raise ProtocolError("Unsupported protocol version.")
     _uuid(message["request_id"], "request_id")
     operation = message["operation"]
-    if operation not in {"submit", *_JOB_OPERATIONS}:
+    if not isinstance(operation, str) or operation not in {"submit", *_JOB_OPERATIONS}:
         raise ProtocolError("Unsupported operation.")
 
     if operation == "submit":
@@ -111,12 +118,12 @@ def decode_message(raw: bytes | str, *, now: datetime | None = None) -> dict:
         _uuid(job["approval_id"], "approval_id")
         if not isinstance(job["source_snapshot_sha256"], str) or not _SHA256.fullmatch(job["source_snapshot_sha256"]):
             raise ProtocolError("source_snapshot_sha256 must be a lowercase SHA-256 digest.")
-        if job["profile_id"] not in ALLOWED_PROFILES:
+        if not isinstance(job["profile_id"], str) or job["profile_id"] not in ALLOWED_PROFILES:
             raise ProtocolError("Unsupported build profile.")
         for field in ("build_image_digest", "exporter_image_digest"):
             if not isinstance(job[field], str) or not _IMAGE.fullmatch(job[field]):
                 raise ProtocolError(f"{field} must be pinned by a full SHA-256 digest.")
-        if job["policy_version"] != POLICY_VERSION:
+        if not isinstance(job["policy_version"], str) or job["policy_version"] != POLICY_VERSION:
             raise ProtocolError("Unsupported runner policy version.")
         _future_expiry(job["expires_at"], now=now)
         if job["release_authorized"] is not False:
@@ -147,7 +154,9 @@ def authorize_peer(
         if peer_uid in operator_uids:
             return
         raise ProtocolError("Peer is not authorized to submit runner jobs.")
-    if operation not in _JOB_OPERATIONS or job_owner_uid is None:
+    if not isinstance(operation, str) or operation not in _JOB_OPERATIONS:
+        raise ProtocolError("Operation authorization context is incomplete.")
+    if isinstance(job_owner_uid, bool) or not isinstance(job_owner_uid, int) or job_owner_uid <= 0:
         raise ProtocolError("Operation authorization context is incomplete.")
     if peer_uid == job_owner_uid or peer_uid in operator_uids:
         return
