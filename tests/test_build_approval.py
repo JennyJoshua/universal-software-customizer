@@ -208,8 +208,11 @@ def test_cli_build_run_consumes_receipt_and_calls_only_approved_profile(tmp_path
     output.mkdir()
     captured = {}
 
-    def fake_runner(source_path, output_path, **kwargs):
-        captured.update({"source": source_path, "output": output_path, **kwargs})
+    def fake_runner(receipt_path, *, source_path, output_path, **kwargs):
+        captured.update({
+            "receipt_path": receipt_path, "source_path": source_path,
+            "output_path": output_path, **kwargs,
+        })
         return {"status": "passed", "operation": "isolated_build", "executed": True}
 
     monkeypatch.setattr("customizer.cli.execute_approved_build", fake_runner)
