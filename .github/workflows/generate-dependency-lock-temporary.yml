@@ -1,6 +1,9 @@
 name: Generate dependency lock (temporary)
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - security/dependency-lock-generation
