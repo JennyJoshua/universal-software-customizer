@@ -208,22 +208,20 @@ def test_cli_build_run_consumes_receipt_and_calls_only_approved_profile(tmp_path
     output.mkdir()
     captured = {}
 
-    def fake_runner(receipt_path, *, source_path, output_path, **kwargs):
-        captured.update({
-            "receipt_path": receipt_path, "source_path": source_path,
-            "output_path": output_path, **kwargs,
-        })
+    def fake_runner(source_path, output_path, **kwargs):
+        captured.update({"source_path": source_path, "output_path": output_path, **kwargs})
         return {"status": "passed", "operation": "isolated_build", "executed": True}
 
-    monkeypatch.setattr("customizer.cli.execute_approved_build", fake_runner)
+    monkeypatch.setattr("customizer.build_runner._run_isolated_build", fake_runner)
     report_path = tmp_path / "evidence.json"
     assert main([
         "build-run", "--approval", str(receipt_path), "--path", str(source),
         "--output-dir", str(output), "--report", str(report_path),
     ]) == 0
-    assert captured["receipt_path"] == str(receipt_path)
-    assert captured["source_path"] == source
-    assert captured["output_path"] == output
+    assert captured["command"] == ["python", "-m", "pytest", "-q"]
+    assert captured["approved"] is True
+    assert captured["source_path"] == str(source.resolve())
+    assert captured["output_path"] == str(output.resolve())
     assert json.loads(report_path.read_text(encoding="utf-8"))["status"] == "passed"
 
     with pytest.raises(ValueError, match="already been used"):
