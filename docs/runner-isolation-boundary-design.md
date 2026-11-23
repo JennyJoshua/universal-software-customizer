@@ -210,7 +210,9 @@ On failure:
 - [ ] Test recovery during an active commit/power loss, disk-full behavior, backup/restore, retention, and cleanup failure.
 - [x] Add a foreground broker CLI with fixed socket/state/UID arguments and graceful SIGTERM/SIGINT shutdown; add a guarded, hardened systemd example plus a host-provisioning runbook (Stage 1 service-lifecycle batch).
 - [ ] Validate the example on a separately approved dedicated host, including real systemd startup/stop, journaling, and cleanup ownership; no permanent service accounts or units are installed by this project.
-- [ ] Add protocol fuzzing and independent approval-signature/tampering tests; approval IDs are replay identifiers, not proof of human consent.
+- [x] Specify the signed-approval contract: Ed25519, a trusted public key, canonical job-bound payload, kernel-UID binding, bounded validity window, nonce, replay persistence, and fail-closed verifier behavior (design only; see `docs/approval-signature-contract.md`).
+- [ ] Implement protocol v2 and broker-side signature verification; the current broker still treats approval IDs as replay identifiers, not proof of human consent.
+- [ ] Add protocol fuzzing and field-by-field signature/tampering tests.
 - [ ] Independently verify that production control-plane identities cannot access real runner keys, persistent replay state, workspaces, or the Docker daemon.
   
 The CI identity test uses disposable accounts and synthetic key/database fixtures. It is evidence for the proposed permission model, not proof of production deployment security. Same-host process/account separation does not protect against host administrators or kernel compromise.
