@@ -14,6 +14,7 @@ import threading
 from pathlib import Path
 from uuid import uuid4
 from .runner_protocol import MAX_MESSAGE_BYTES, ProtocolError, authorize_peer, decode_message
+from .runner_state import RunnerStateStore
 
 MAX_JOBS = 1000
 MAX_REQUESTS = 10000
@@ -56,24 +57,24 @@ def _send_response(connection, value):
 class LocalRunnerBroker:
     """Single-threaded test broker with a private socket and in-memory job registry."""
 
-    def __init__(self, socket_path, *, submitter_uids=frozenset(), operator_uids=frozenset(), socket_gid=None):
+    def __init__(self, socket_path, *, submitter_uids=frozenset(), operator_uids=frozenset(), socket_gid=None, state_db_path=None):
         self.socket_path = Path(socket_path).expanduser()
         if isinstance(socket_gid, bool) or (socket_gid is not None and (not isinstance(socket_gid, int) or socket_gid <= 0)):
             raise ValueError("socket_gid must be a positive group ID.")
         self.socket_gid = socket_gid
+        self._state = RunnerStateStore(state_db_path)
         self.submitter_uids = frozenset(submitter_uids)
         self.operator_uids = frozenset(operator_uids)
         self._listener = None
         self._stop = threading.Event()
-        self._jobs = {}
-        self._request_ids = set()
-        self._approval_ids = set()
 
     def start(self):
         if self._listener is not None:
             raise RuntimeError("Broker is already started.")
         if os.getuid() == 0:
             raise ProtocolError("The local runner broker must not run as root.")
+        if self.socket_gid is not None and self._state.db_path is None:
+            raise ProtocolError("Group-access broker mode requires a durable runner state database.")
         parent = self.socket_path.parent
         if parent.is_symlink():
             raise ProtocolError("Socket directory must not be a symlink.")
@@ -128,8 +129,10 @@ class LocalRunnerBroker:
                 raise ProtocolError("Socket permissions or ownership do not match the configured access policy.")
             listener.listen(8)
             listener.settimeout(0.2)
+            self._state.start()
         except Exception:
             listener.close()
+            self._state.close()
             try:
                 self.socket_path.unlink()
             except OSError:
@@ -165,55 +168,58 @@ class LocalRunnerBroker:
     def _dispatch(self, peer_uid, message):
         operation = message["operation"]
         request_id = message["request_id"]
-        if operation == "submit":
-            authorize_peer(peer_uid, operation=operation,
-                           submitter_uids=self.submitter_uids, operator_uids=self.operator_uids)
-            if request_id in self._request_ids:
-                raise ProtocolError("Duplicate request ID.")
-            if len(self._jobs) >= MAX_JOBS:
-                raise ProtocolError("Broker job capacity has been reached.")
-            if len(self._request_ids) >= MAX_REQUESTS:
-                raise ProtocolError("Broker request capacity has been reached.")
-            job_data = message["job"]
-            if job_data["approval_id"] in self._approval_ids:
-                raise ProtocolError("Approval ID has already been submitted.")
-            job_id = str(uuid4())
-            self._jobs[job_id] = {
-                "owner_uid": peer_uid, "state": "queued",
-                "profile_id": job_data["profile_id"],
-                "source_snapshot_sha256": job_data["source_snapshot_sha256"],
-                "approval_id": job_data["approval_id"],
-                "release_authorized": False,
-            }
-            self._approval_ids.add(job_data["approval_id"])
-            self._request_ids.add(request_id)
-            return {"job_id": job_id, "state": "queued"}
+        with self._state.transaction():
+            if operation == "submit":
+                authorize_peer(peer_uid, operation=operation,
+                               submitter_uids=self.submitter_uids, operator_uids=self.operator_uids)
+                if self._state.request_seen(request_id):
+                    raise ProtocolError("Duplicate request ID.")
+                if self._state.job_count() >= MAX_JOBS:
+                    raise ProtocolError("Broker job capacity has been reached.")
+                if self._state.request_count() >= MAX_REQUESTS:
+                    raise ProtocolError("Broker request capacity has been reached.")
+                job_data = message["job"]
+                if self._state.approval_seen(job_data["approval_id"]):
+                    raise ProtocolError("Approval ID has already been submitted.")
+                job_id = str(uuid4())
+                job = {
+                    "owner_uid": peer_uid,
+                    "state": "queued",
+                    "profile_id": job_data["profile_id"],
+                    "source_snapshot_sha256": job_data["source_snapshot_sha256"],
+                    "approval_id": job_data["approval_id"],
+                    "release_authorized": False,
+                }
+                self._state.create_job(job_id, job)
+                self._state.record_request(request_id)
+                return {"job_id": job_id, "state": "queued"}
 
-        job_id = message["job_id"]
-        job = self._jobs.get(job_id)
-        if job is None:
-            raise ProtocolError("Unknown job or unauthorized operation.")
-        try:
-            authorize_peer(peer_uid, operation=operation, job_owner_uid=job["owner_uid"],
-                           operator_uids=self.operator_uids)
-        except ProtocolError as exc:
-            raise ProtocolError("Unknown job or unauthorized operation.") from exc
-        if request_id in self._request_ids:
-            raise ProtocolError("Duplicate request ID.")
-        if len(self._request_ids) >= MAX_REQUESTS:
-            raise ProtocolError("Broker request capacity has been reached.")
-        if operation == "cancel":
-            if job["state"] == "queued":
-                job["state"] = "cancelled"
-            result = {"job_id": job_id, "state": job["state"]}
-        elif operation == "status":
-            result = {"job_id": job_id, "state": job["state"], "profile_id": job["profile_id"]}
-        elif operation == "result":
-            result = {"job_id": job_id, "state": job["state"], "result_available": False}
-        else:
-            raise ProtocolError("Unsupported operation.")
-        self._request_ids.add(request_id)
-        return result
+            job_id = message["job_id"]
+            job = self._state.get_job(job_id)
+            if job is None:
+                raise ProtocolError("Unknown job or unauthorized operation.")
+            try:
+                authorize_peer(peer_uid, operation=operation, job_owner_uid=job["owner_uid"],
+                               operator_uids=self.operator_uids)
+            except ProtocolError as exc:
+                raise ProtocolError("Unknown job or unauthorized operation.") from exc
+            if self._state.request_seen(request_id):
+                raise ProtocolError("Duplicate request ID.")
+            if self._state.request_count() >= MAX_REQUESTS:
+                raise ProtocolError("Broker request capacity has been reached.")
+            if operation == "cancel":
+                if job["state"] == "queued":
+                    self._state.set_job_state(job_id, "cancelled")
+                    job["state"] = "cancelled"
+                result = {"job_id": job_id, "state": job["state"]}
+            elif operation == "status":
+                result = {"job_id": job_id, "state": job["state"], "profile_id": job["profile_id"]}
+            elif operation == "result":
+                result = {"job_id": job_id, "state": job["state"], "result_available": False}
+            else:
+                raise ProtocolError("Unsupported operation.")
+            self._state.record_request(request_id)
+            return result
 
     def close(self):
         self._stop.set()
@@ -226,6 +232,8 @@ class LocalRunnerBroker:
                 self.socket_path.unlink()
         except FileNotFoundError:
             pass
+        finally:
+            self._state.close()
 
 
 def send_local_request(socket_path, message, *, timeout=2.0):
