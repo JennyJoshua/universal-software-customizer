@@ -197,15 +197,17 @@ On failure:
 - [x] Define the versioned, bounded protocol envelope and exact operation schemas (PR #87; CI #319 passed).
 - [x] Reject unknown fields, duplicate JSON keys, malformed value types, arbitrary commands/paths, unsupported profiles, invalid digests, expiry violations, and release authorization in the protocol validator (PR #87).
 - [x] Add a test-only Unix-domain socket broker using kernel peer credentials, private 0700/0600 development mode, and administrator-provisioned 2710/0660 group mode (PRs #88–#89; CI #330 and #338 passed).
-- [x] Add separate submitter/operator UID allowlists, per-operation job-owner checks, bounded in-memory job/request counts, request/approval replay checks, cancellation, and non-disclosing unknown/unauthorized responses (PR #88).
+- [x] Add separate submitter/operator UID allowlists, per-operation job-owner checks, bounded job/request counts, replay checks, cancellation, and non-disclosing unknown/unauthorized responses (PR #88).
 - [x] In ephemeral Linux CI, run the broker under a temporary runner UID and connect from a separate control-plane UID; verify protected synthetic runner state, group-only socket traversal, kernel peer-UID authorization, and denial of an unapproved UID in the same group (PR #89; CI #338 passed).
 - [x] Verify in the ephemeral CI fixture that runner/control-plane accounts are not members of the Docker group and cannot read the Docker socket when present.
+- [x] Require a broker-owned SQLite database in group-access mode; enforce a service-owned 0700 state directory, 0600 single-link database file, transactional request/approval replay records, schema version, and startup integrity check (Stage 1 durable-state batch).
+- [x] Verify job state and replay identifiers survive a normal broker restart; verify the control-plane UID cannot read the database in the ephemeral CI fixture.
+- [ ] Test abrupt process termination, SQLite recovery/corruption, disk-full behavior, capacity exhaustion, retention, and cleanup failure.
 - [ ] Define and validate permanent host provisioning, systemd service lifecycle, operational logging, and restart/cleanup ownership; no permanent service accounts are installed by this project.
-- [ ] Add protocol fuzzing and independent approval-signature/tampering tests.
-- [ ] Add durable broker-owned replay/job state and test crash recovery, restart, cleanup failure, and retention.
+- [ ] Add protocol fuzzing and independent approval-signature/tampering tests; approval IDs are replay identifiers, not proof of human consent.
 - [ ] Independently verify that production control-plane identities cannot access real runner keys, persistent replay state, workspaces, or the Docker daemon.
   
-The CI identity test uses disposable accounts and a synthetic key fixture. It is evidence for the proposed permission model, not proof of production deployment security. Same-host process/account separation does not protect against host administrators or kernel compromise.
+The CI identity test uses disposable accounts and synthetic key/database fixtures. It is evidence for the proposed permission model, not proof of production deployment security. Same-host process/account separation does not protect against host administrators or kernel compromise.
 
 ### Stage 2 — disposable VM execution prototype (synthetic fixtures only)
 - [ ] Provision a minimal, digest-pinned runner VM image through a documented trusted process.
