@@ -60,3 +60,45 @@ def test_source_snapshot_keeps_known_secret_paths_excluded_from_content_scan(tmp
     destination = tmp_path / "snapshot"
     _stage_source_snapshot(source, destination)
     assert not (destination / ".env").exists()
+
+
+def test_detects_additional_provider_token_formats():
+    cases = [
+        (b"glpat-" + b"A" * 20, "gitlab_token"),
+        (b"GOCSPX-" + b"A" * 24, "google_oauth_client_secret"),
+        (b"sk-proj-" + b"A" * 24, "openai_api_key"),
+        (b"sk-ant-" + b"A" * 24, "anthropic_api_key"),
+        (b"hf_" + b"A" * 24, "huggingface_token"),
+        (b"npm_" + b"A" * 36, "npm_token"),
+        (b"pypi-" + b"A" * 36, "pypi_token"),
+    ]
+    for value, expected_rule in cases:
+        scanner = SourceSecretScanner()
+        scanner.feed(value)
+        assert scanner.findings == {expected_rule}
+
+
+def test_detects_encrypted_private_key_header():
+    scanner = SourceSecretScanner()
+    scanner.feed(b"-----BEGIN ENCRYPTED PRIVATE KEY-----")
+    assert scanner.findings == {"private_key_pem"}
+
+
+def test_additional_provider_tokens_are_detected_across_chunk_boundary():
+    scanner = SourceSecretScanner()
+    scanner.feed(b"config=" + b"sk-ant-" + b"A" * 11)
+    scanner.feed(b"A" * 13)
+    assert scanner.findings == {"anthropic_api_key"}
+
+
+def test_additional_rule_errors_never_echo_credential_value(tmp_path):
+    import pytest
+    from customizer.build_runner import _stage_source_snapshot
+
+    source = tmp_path / "source"
+    source.mkdir()
+    token = b"npm_" + b"Z" * 36
+    (source / "package-config.txt").write_bytes(b"registry-token=" + token)
+    with pytest.raises(ValueError, match="npm_token") as error:
+        _stage_source_snapshot(source, tmp_path / "snapshot")
+    assert token.decode() not in str(error.value)
