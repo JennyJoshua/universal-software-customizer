@@ -206,8 +206,9 @@ def test_runner_service_identity_is_separated_from_control_plane():
         }
         status_result = _sudo(
             "-u", client, "--", "env", f"PYTHONPATH={repo_engine}", "python3", "-c", client_code,
-            socket_path, json.dumps(status_message),
+            socket_path, json.dumps(status_message), check=False,
         )
+        assert status_result.returncode == 0, status_result.stderr
         persisted_status = json.loads(status_result.stdout.strip())
         assert persisted_status["ok"] is True
         assert persisted_status["state"] == "queued"
