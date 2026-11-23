@@ -133,3 +133,10 @@ def test_rejects_invalid_authorization_context():
     for operation, owner in (([], 1000), ("status", 0), ("status", True)):
         with pytest.raises(ProtocolError):
             authorize_peer(1000, operation=operation, job_owner_uid=owner)
+
+
+def test_submit_authorization_uses_explicit_submitter_allowlist():
+    authorize_peer(1200, operation="submit", submitter_uids={1200})
+    authorize_peer(1300, operation="submit", operator_uids={1300})
+    with pytest.raises(ProtocolError, match="not authorized"):
+        authorize_peer(1400, operation="submit", submitter_uids={1200})
