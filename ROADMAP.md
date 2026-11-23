@@ -74,7 +74,12 @@
 - [x] Complete failure-injection coverage for output-path/export races, helper startup, volume creation/removal, and interrupted export (PR #73; CI #279 and live Docker run #6 passed).
 - [x] Keep artifacts detached from automatic public release; provenance remains `release_authorized: false`, with no automatic publishing or deployment path.
 
-### Phase 6 acceptance gate\n\n- [ ] Complete a final acceptance audit against merged implementation, tests, live Docker evidence, and the threat boundaries documented in `docs/isolated-build-model.md`.\n- [ ] Keep customer repositories disabled until the separate security review explicitly authorizes a narrowly scoped pilot.\n\n## Phase 7 — Additional adapters
+### Phase 6 acceptance gate
+
+- [ ] Complete a final acceptance audit against merged implementation, tests, live Docker evidence, and the threat boundaries documented in `docs/isolated-build-model.md`.
+- [ ] Keep customer repositories disabled until the separate security review explicitly authorizes a narrowly scoped pilot.
+
+## Phase 7 — Additional adapters
 
 - [ ] Prioritize based on real project demand.
 - [ ] Add one adapter at a time with fixtures and tests.
