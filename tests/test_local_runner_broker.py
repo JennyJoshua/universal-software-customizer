@@ -230,10 +230,14 @@ def test_broker_supports_preprovisioned_group_socket_mode(tmp_path):
     socket_dir = tmp_path / "group-socket"
     socket_dir.mkdir(mode=0o700)
     socket_dir.chmod(0o2710)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(mode=0o700)
+    state_dir.chmod(0o700)
     broker = LocalRunnerBroker(
         socket_dir / "runner.sock",
         submitter_uids={os.getuid()},
         socket_gid=os.getgid(),
+        state_db_path=state_dir / "broker.sqlite3",
     )
     broker.start()
     try:
@@ -249,11 +253,29 @@ def test_broker_supports_preprovisioned_group_socket_mode(tmp_path):
 
 def test_broker_group_socket_mode_requires_preprovisioned_private_directory(tmp_path):
     missing = tmp_path / "not-created"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(mode=0o700)
+    state_dir.chmod(0o700)
     with pytest.raises(ValueError, match="pre-provisioned"):
-        LocalRunnerBroker(missing / "runner.sock", socket_gid=os.getgid()).start()
+        LocalRunnerBroker(
+            missing / "runner.sock", socket_gid=os.getgid(),
+            state_db_path=state_dir / "broker.sqlite3",
+        ).start()
 
     open_dir = tmp_path / "open-group"
     open_dir.mkdir(mode=0o700)
     open_dir.chmod(0o750)
     with pytest.raises(ValueError, match="2710"):
-        LocalRunnerBroker(open_dir / "runner.sock", socket_gid=os.getgid()).start()
+        LocalRunnerBroker(
+            open_dir / "runner.sock", socket_gid=os.getgid(),
+            state_db_path=state_dir / "broker.sqlite3",
+        ).start()
+
+
+
+def test_group_socket_mode_requires_durable_state_database(tmp_path):
+    socket_dir = tmp_path / "group-socket"
+    socket_dir.mkdir(mode=0o700)
+    socket_dir.chmod(0o2710)
+    with pytest.raises(ValueError, match="durable runner state database"):
+        LocalRunnerBroker(socket_dir / "runner.sock", socket_gid=os.getgid()).start()
