@@ -196,13 +196,16 @@ On failure:
 ### Stage 1 — local separation prototype (synthetic fixtures only; in progress)
 - [x] Define the versioned, bounded protocol envelope and exact operation schemas (PR #87; CI #319 passed).
 - [x] Reject unknown fields, duplicate JSON keys, malformed value types, arbitrary commands/paths, unsupported profiles, invalid digests, expiry violations, and release authorization in the protocol validator (PR #87).
-- [x] Add a test-only Unix-domain socket broker using kernel peer credentials, a private 0700 socket directory, and a 0600 socket (PR #88; CI #330 passed).
+- [x] Add a test-only Unix-domain socket broker using kernel peer credentials, private 0700/0600 development mode, and administrator-provisioned 2710/0660 group mode (PRs #88–#89; CI #330 and #338 passed).
 - [x] Add separate submitter/operator UID allowlists, per-operation job-owner checks, bounded in-memory job/request counts, request/approval replay checks, cancellation, and non-disclosing unknown/unauthorized responses (PR #88).
-- [ ] Provision distinct control-plane and runner OS identities/groups; current prototype runs under one OS identity.
-- [ ] Demonstrate that the control plane cannot read runner keys/replay state or access the Docker daemon; the prototype has no runner key/state or Docker connection.
+- [x] In ephemeral Linux CI, run the broker under a temporary runner UID and connect from a separate control-plane UID; verify protected synthetic runner state, group-only socket traversal, kernel peer-UID authorization, and denial of an unapproved UID in the same group (PR #89; CI #338 passed).
+- [x] Verify in the ephemeral CI fixture that runner/control-plane accounts are not members of the Docker group and cannot read the Docker socket when present.
+- [ ] Define and validate permanent host provisioning, systemd service lifecycle, operational logging, and restart/cleanup ownership; no permanent service accounts are installed by this project.
 - [ ] Add protocol fuzzing and independent approval-signature/tampering tests.
 - [ ] Add durable broker-owned replay/job state and test crash recovery, restart, cleanup failure, and retention.
-- [ ] Do not treat same-host process separation as protection against host administrators.
+- [ ] Independently verify that production control-plane identities cannot access real runner keys, persistent replay state, workspaces, or the Docker daemon.
+  
+The CI identity test uses disposable accounts and a synthetic key fixture. It is evidence for the proposed permission model, not proof of production deployment security. Same-host process/account separation does not protect against host administrators or kernel compromise.
 
 ### Stage 2 — disposable VM execution prototype (synthetic fixtures only)
 - [ ] Provision a minimal, digest-pinned runner VM image through a documented trusted process.
