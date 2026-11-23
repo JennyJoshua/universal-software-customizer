@@ -87,3 +87,8 @@ The canonical GitHub repository is [JennyJoshua/universal-software-customizer](h
 ## Legal notice
 
 This project provides technical workflow support, not legal advice. A human must confirm that the upstream licence and all third-party rights permit the intended use, distribution, and branding. If terms are missing, conflicting, or unclear, stop and obtain qualified advice.
+
+
+## Retention and deletion
+
+See [docs/retention-and-deletion-policy.md](docs/retention-and-deletion-policy.md) for the lifecycle and limitations of transient build data, evidence, artifacts, logs, Docker resources, caches, and hosted CI records. USC performs scoped application cleanup but does not claim physical secure erasure or automatic expiry of caller-retained evidence and artifacts.
