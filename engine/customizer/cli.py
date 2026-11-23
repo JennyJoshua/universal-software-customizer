@@ -19,6 +19,7 @@ from .acceptance import accept_sync_candidate, recover_sync_acceptance
 from .candidate_discard import discard_sync_candidate
 from .build_approval import create_build_approval_request, approve_build_request, consume_build_approval, available_build_profiles
 from .build_runner import run_isolated_build
+from .source_inventory import create_source_review
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -141,6 +142,10 @@ def build_parser() -> argparse.ArgumentParser:
     discard_parser.add_argument("--candidate-report", required=True, help="Report emitted by sync-candidate.")
     discard_parser.add_argument("--approve", action="store_true", help="Explicitly approve removal of the validated candidate workspace.")
     discard_parser.add_argument("--output", help="Write discard report outside both repositories.")
+
+    source_review = subparsers.add_parser("source-review", help="Create a bounded, read-only source inventory for human review; never executes project code.")
+    source_review.add_argument("--path", required=True, help="Existing source directory to inventory.")
+    source_review.add_argument("--output", help="Write JSON report outside the source directory.")
 
     build_request = subparsers.add_parser("build-request", help="Create a short-lived request for one allowlisted isolated-build profile; does not execute code.")
     build_request.add_argument("--path", required=True, help="Clean Git source directory to bind to this request.")
@@ -306,6 +311,10 @@ def main(argv: list[str] | None = None) -> int:
             _write_report(report, args.output, source_root)
             if report.get("status", "").startswith("blocked"):
                 return 2
+        elif args.command == "source-review":
+            source_root = Path(args.path).expanduser().resolve(strict=True)
+            report = create_source_review(source_root)
+            _write_report(report, args.output, source_root)
         elif args.command == "sync-plan":
             source_root = Path(args.path).expanduser().resolve()
             base_sha = resolve_sync_base(source_root, base_sha=args.base_sha, upstream_url=args.upstream_url)
