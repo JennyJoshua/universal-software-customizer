@@ -312,9 +312,9 @@ def main(argv: list[str] | None = None) -> int:
             if report.get("status", "").startswith("blocked"):
                 return 2
         elif args.command == "source-review":
-            source_root = Path(args.path).expanduser().resolve(strict=True)
-            report = create_source_review(source_root)
-            _write_report(report, args.output, source_root)
+            source_arg = Path(args.path).expanduser()
+            report = create_source_review(source_arg)
+            _write_report(report, args.output, source_arg.resolve(strict=True))
         elif args.command == "sync-plan":
             source_root = Path(args.path).expanduser().resolve()
             base_sha = resolve_sync_base(source_root, base_sha=args.base_sha, upstream_url=args.upstream_url)
