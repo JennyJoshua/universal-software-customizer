@@ -108,7 +108,13 @@ def test_runner_service_identity_is_separated_from_control_plane():
             assert _sudo("-u", client, "--", "test", "-r", docker_socket, check=False).returncode != 0
 
         socket_path = os.path.join(socket_dir, "runner.sock")
-        repo_engine = str(Path(__file__).resolve().parents[2] / "engine")
+        source_package = Path(__file__).resolve().parents[2] / "engine" / "customizer"
+        python_root = os.path.join(base, "python")
+        os.makedirs(python_root, mode=0o755)
+        shutil.copytree(source_package, os.path.join(python_root, "customizer"))
+        _sudo("chown", "-R", f"{runner}:{group}", python_root)
+        _sudo("chmod", "-R", "a+rX", python_root)
+        repo_engine = python_root
         server_code = (
             "import sys; from customizer.local_runner_broker import LocalRunnerBroker; "
             "b=LocalRunnerBroker(sys.argv[1], submitter_uids={int(sys.argv[2])}, socket_gid=int(sys.argv[3])); "
