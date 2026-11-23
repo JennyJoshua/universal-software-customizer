@@ -1,7 +1,8 @@
 """Test-only Unix-domain socket broker for the USC Stage 1 prototype.
 
-Accepts validated synthetic metadata and maintains in-memory state only.
-It never starts Docker, runs commands, reads source paths, or exports files.
+Accepts validated synthetic metadata only. It never starts Docker, runs commands,
+reads source paths, or exports files. Group-access mode requires a private,
+broker-owned SQLite state database for durable replay protection.
 """
 from __future__ import annotations
 import errno
@@ -55,7 +56,7 @@ def _send_response(connection, value):
 
 
 class LocalRunnerBroker:
-    """Single-threaded test broker with a private socket and in-memory job registry."""
+    """Single-threaded synthetic broker with a private socket and broker-owned state store."""
 
     def __init__(self, socket_path, *, submitter_uids=frozenset(), operator_uids=frozenset(), socket_gid=None, state_db_path=None):
         self.socket_path = Path(socket_path).expanduser()
