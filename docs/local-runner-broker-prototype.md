@@ -8,7 +8,8 @@
 The prototype broker:
 - Listens on one Unix-domain stream socket.
 - Requires a current-user-owned socket directory with no group/other permissions (0700).
-- Creates a current-user-owned socket with mode 0600.
+- Creates a current-user-owned socket with mode 0600; refuses to unlink a live socket and removes only an owned stale socket after a failed connection probe.
+- Rejects root execution, bounds Unix socket path length, applies a per-connection timeout, and caps the in-memory registry at 1,000 jobs / 10,000 requests.
 - Uses Linux kernel peer credentials (`SO_PEERCRED`) to obtain the connecting UID. If the platform cannot provide peer credentials, the request fails closed.
 - Applies separate submitter and operator UID allowlists. Status, cancel, and result operations are checked against the job owner's UID or an operator UID for every request.
 - Accepts only the strict protocol contract defined in `customizer.runner_protocol`.
