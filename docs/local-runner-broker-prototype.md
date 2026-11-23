@@ -1,7 +1,7 @@
 # USC Stage 1 — local Unix-socket broker prototype
 
 **Status:** test-only local IPC prototype  
-**Scope:** synthetic metadata requests and in-memory job state. No build execution.
+**Scope:** synthetic metadata requests with in-memory development state or broker-private SQLite state in group mode. No build execution.
 
 ## Local test deployment
 
@@ -14,14 +14,15 @@ The prototype broker:
 - Uses Linux kernel peer credentials (`SO_PEERCRED`) to obtain the connecting UID. If the platform cannot provide peer credentials, the request fails closed.
 - Applies separate submitter and operator UID allowlists. Status, cancel, and result operations are checked against the job owner's UID or an operator UID for every request. Group membership permits connecting only; kernel-reported UID authorization remains mandatory.
 - Accepts only the strict protocol contract defined in `customizer.runner_protocol`.
-- Stores synthetic job metadata, request IDs, and approval IDs in memory only.
+- Default private development mode may use in-memory state. Group-access mode requires a durable SQLite database in a service-owned 0700 directory; the database is service-owned mode 0600.
+- SQLite uses explicit transactions, a unique approval-ID constraint, a unique request-ID ledger, full synchronous commits, a rollback journal, and a startup integrity check. Job status and replay IDs survive broker restarts.
 - Exposes status/cancel/result metadata only. It does not return artifacts.
 
 ## Service identity and permissions — important deployment limitation
 
 The default local test mode runs as the current user with a 0700 directory / 0600 socket. The optional group mode supports a distinct runner UID and client group only when an administrator has provisioned the directory with the exact 2710 ownership/mode policy. The broker checks the connecting UID with kernel peer credentials; group membership alone never authorizes an operation.
 
-CI includes an ephemeral Linux integration test that creates temporary runner, client, and unauthorized-client accounts. It starts the broker as the runner UID, verifies that the client can connect through the group socket but cannot list the socket directory or read a runner-private synthetic key file, and confirms that an unapproved UID in the same group is denied. It also verifies that the runner/client accounts are not members of the Docker group and cannot read a Docker socket when one is present. These accounts are removed after the test.
+CI includes an ephemeral Linux integration test that creates temporary runner, client, and unauthorized-client accounts. It starts the broker as the runner UID, verifies that the client can connect through the group socket but cannot list the socket directory or read a runner-private synthetic key file or SQLite state database, and confirms that an unapproved UID in the same group is denied. It also verifies that the runner/client accounts are not members of the Docker group and cannot read a Docker socket when one is present. These accounts are removed after the test.
 
 This is a test of the proposed OS permission boundary, not a persistent installation or production service. A future service deployment must still provision and manage its own identities. Before such a deployment, define and test:
 - A dedicated runner service UID with no interactive login and no membership in unrelated groups.
@@ -36,7 +37,7 @@ The ephemeral CI test proves the fixture-level boundary only. It does not provis
 
 ## Security and functional limitations
 
-- The in-memory job registry and replay sets disappear on restart; this is not durable replay protection or crash recovery.
+- In-memory private development mode loses jobs and replay IDs on restart. Group-access mode requires SQLite persistence, but power-loss recovery, corruption handling, backup/restore, retention, and long-duration stress still need dedicated testing.
 - The broker does not verify a signed approval or independently authenticate a human approver.
 - A queued job is only a synthetic record. No process is started, no Docker daemon is contacted, no source path is opened, and no artifact is produced.
 - Cancellation only changes the synthetic queued state.
@@ -46,7 +47,7 @@ The ephemeral CI test proves the fixture-level boundary only. It does not provis
 
 ## Stage 1 next gates
 
-1. Review the ephemeral CI evidence and finalize an administrator-run service UID/group provisioning and lifecycle plan.
-2. Add persistent, broker-owned replay/job state only after defining crash-safe atomicity and retention.
-3. Add lifecycle, crash, malformed-stream, duplicate-operation, and cleanup-failure tests.
+1. Review the durable-state implementation and ephemeral CI evidence; finalize administrator-run service UID/group provisioning and lifecycle documentation.
+2. Test abrupt process termination, SQLite recovery, database corruption, capacity exhaustion, retention, and cleanup failure.
+3. Add protocol fuzzing and independent approval-signature verification before treating approvals as external consent.
 4. Keep Docker and the existing build runner disconnected until the independent service identity and approval model have been reviewed.

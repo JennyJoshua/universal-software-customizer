@@ -115,14 +115,16 @@ def test_runner_service_identity_is_separated_from_control_plane():
         _sudo("chown", "-R", f"{runner}:{group}", python_root)
         _sudo("chmod", "-R", "a+rX", python_root)
         repo_engine = python_root
+        state_db_path = os.path.join(state_dir, "broker.sqlite3")
         server_code = (
             "import sys; from customizer.local_runner_broker import LocalRunnerBroker; "
-            "b=LocalRunnerBroker(sys.argv[1], submitter_uids={int(sys.argv[2])}, socket_gid=int(sys.argv[3])); "
+            "b=LocalRunnerBroker(sys.argv[1], submitter_uids={int(sys.argv[2])}, "
+            "socket_gid=int(sys.argv[3]), state_db_path=sys.argv[4]); "
             "b.start(); print('READY', flush=True); b.serve_forever()"
         )
         broker_process = subprocess.Popen(
             ["sudo", "-n", "-u", runner, "--", "env", f"PYTHONPATH={repo_engine}",
-             "python3", "-c", server_code, socket_path, str(client_uid), str(group_gid)],
+             "python3", "-c", server_code, socket_path, str(client_uid), str(group_gid), state_db_path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
@@ -143,6 +145,9 @@ def test_runner_service_identity_is_separated_from_control_plane():
         # Verify owner/group/mode on the service socket.
         socket_stat = _sudo("stat", "-c", "%u:%g:%a", socket_path).stdout.strip()
         assert socket_stat == f"{runner_uid}:{group_gid}:660"
+        state_stat = _sudo("stat", "-c", "%u:%a", state_db_path).stdout.strip()
+        assert state_stat == f"{runner_uid}:600"
+        assert _sudo("-u", client, "--", "cat", state_db_path, check=False).returncode != 0
 
         client_code = (
             "import json,sys; from customizer.local_runner_broker import send_local_request; "
