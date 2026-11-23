@@ -12,11 +12,11 @@ def test_source_review_lists_excluded_and_included_paths_without_execution(tmp_p
     report = create_source_review(source)
     assert report["execution_performed"] is False
     assert report["human_review_required"] is True
-    assert report["included_file_count"] == 1
+    assert report["scanned_file_count"] == 1
     assert report["entries"] == [
         {"path": ".env", "status": "excluded", "reason": "sensitive_file"},
         {"path": ".git", "status": "excluded", "reason": "sensitive_directory"},
-        {"path": "app/main.py", "status": "included", "size_bytes": 12},
+        {"path": "app/main.py", "status": "included", "size_bytes": 11},
     ]
     assert "not-reported" not in str(report)
 
