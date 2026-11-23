@@ -25,6 +25,10 @@ The source snapshot rejects symlinks and non-regular files, fails on incomplete 
 
 The host output directory must exist, be empty, be writable by the non-root runner, and be separate from (not an ancestor or descendant of) the source directory. Build code writes only to the size-limited container tmpfs; USC copies the output back after execution. Exported symlinks are rejected. This avoids exposing an unbounded host directory as a writable container mount.
 
+## Pre-build source review
+
+Before creating a build request, run `usc source-review --path ./candidate --output ./source-review.json`. This read-only command does not invoke Docker or execute project code. It lists included paths, known excluded sensitive paths, and paths containing selected credential-pattern findings; it never prints file contents or matched credential values. The report is bounded to 500 entries and marks truncation. Review the report manually: excluded files and directories are not part of the later build snapshot, and any path marked `review_required` must be investigated and cleaned before proceeding. The inventory is a point-in-time view, not an immutable approval or a guarantee that files cannot change afterward. The build request and runner still perform their own Git identity checks, bounded snapshotting, and secret scanning. This finite scanner cannot prove that a source tree is secret-free. Source review does not approve a build.
+
 ## Reviewed CLI approval workflow
 
 The user-facing CLI now separates request creation, explicit review/approval, and execution. The fixed allowlist currently contains `python-pytest` (`python -m pytest -q`) and `python-container-smoke` (a fixed synthetic-only probe of container isolation); callers cannot supply arbitrary commands or shell strings through this workflow. The runner also requires the pinned USC export-helper image `busybox@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662` to be pre-provisioned locally; it never pulls this image during a build.
