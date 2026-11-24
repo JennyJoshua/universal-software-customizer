@@ -227,7 +227,8 @@ def _read_trusted_public_key(path: str | os.PathLike[str]) -> tuple[int, bytes]:
     key_path = Path(path)
     if not key_path.is_absolute():
         raise ProtocolError("Trusted public-key path must be absolute.")
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = (os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+             | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     try:
         fd = os.open(key_path, flags)
     except OSError as exc:
