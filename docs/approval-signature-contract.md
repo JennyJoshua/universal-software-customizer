@@ -16,7 +16,7 @@ A valid signature proves that the configured key signed the canonical approval p
 
 - Signature algorithm: Ed25519.
 - Verification utility: OpenSSL `pkeyutl`, invoked through a fixed absolute executable path (`/usr/bin/openssl`).
-- Use `pkeyutl -verify -pubin -inkey <trusted-public-key> -sigfile <temporary-signature> -rawin`; the canonical payload is supplied on standard input.
+- Use `pkeyutl -verify -pubin -inkey <trusted-public-key> -sigfile <temporary-signature> -in <temporary-payload> -rawin`; OpenSSL's Ed25519 one-shot operation requires seekable input files.
 - No shell, caller-supplied executable, caller-supplied file path, or generic command interface is permitted.
 - The verifier uses a short timeout, bounded payload/signature sizes, fixed environment, closed inherited file descriptors, and suppressed subprocess output.
 - OpenSSL's Ed25519 one-shot operation requires a seekable input file. The canonical payload and signature are therefore each written to separate 0600 temporary files in the runner-private 0700 state directory and removed after verification. No payload or signature is passed through a shell or caller-selected path.
