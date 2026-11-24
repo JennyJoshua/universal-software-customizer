@@ -13,7 +13,10 @@ The prototype broker:
 - Rejects root execution, bounds Unix socket path length, applies a per-connection timeout, and caps the in-memory registry at 1,000 jobs / 10,000 requests.
 - Uses Linux kernel peer credentials (`SO_PEERCRED`) to obtain the connecting UID. If the platform cannot provide peer credentials, the request fails closed.
 - Applies separate submitter and operator UID allowlists. Status, cancel, and result operations are checked against the job owner's UID or an operator UID for every request. Group membership permits connecting only; kernel-reported UID authorization remains mandatory.
-- Accepts only the strict protocol contract defined in `customizer.runner_protocol`.
+- Accepts protocol-v2 signed submissions only, validated by `customizer.runner_approval`; protocol-v1 status/cancel/result requests remain supported, but unsigned protocol-v1 submissions are rejected.
+- Signed submissions require a configured trusted Ed25519 public key, a broker-private durable SQLite state database, an allowlisted kernel-authenticated peer UID, and a valid signature bound to the exact source/profile/image/policy fields.
+- The broker verifies Ed25519 signatures with the fixed root-owned `/usr/bin/openssl` executable; it does not accept caller-selected commands or executables.
+- Signature verification happens before the database write transaction. Job creation and the request-ID, approval-ID, and nonce replay records are then written atomically in one SQLite transaction; any replay or ledger failure rejects the job.
 - Default private development mode may use in-memory state. Group-access mode requires a durable SQLite database in a service-owned 0700 directory; the database is service-owned mode 0600.
 - SQLite uses explicit transactions, unique approval-ID and request-ID constraints, a unique nonce replay ledger (schema v2), full synchronous commits, a rollback journal, and a startup integrity check. Job status and all replay IDs survive normal restarts. Schema v1 databases are rejected; this prototype requires an explicit state reset rather than silently migrating older state.
 - The ephemeral CI test kills the broker process after a committed job, restarts it against the same database, verifies stale-socket recovery, checks the job state, and confirms request/approval replays remain rejected.
@@ -41,7 +44,7 @@ The ephemeral CI test proves the fixture-level boundary only. It does not provis
 - In-memory private development mode loses jobs and replay IDs on restart.
 - SQLite corruption is rejected at startup, and an injected failure between job creation and replay-ledger insertion is tested for transaction rollback. These checks do not prove power-loss durability or recovery from a crash during an active commit.
 - Disk-full behavior, backup/restore, retention, and long-duration stress still need dedicated testing.
-- The broker does not verify a signed approval or independently authenticate a human approver.
+- A valid Ed25519 signature proves that the configured approval key signed the canonical job-bound payload. It does not prove that a human personally approved the job; authentication, review UI, and consent capture are outside this prototype.
 - A queued job is only a synthetic record. No process is started, no Docker daemon is contacted, no source path is opened, and no artifact is produced.
 - Cancellation only changes the synthetic queued state.
 - Result lookup reports `result_available: false`.
@@ -52,5 +55,5 @@ The ephemeral CI test proves the fixture-level boundary only. It does not provis
 
 1. Review the abrupt-process-restart and corruption tests; add disk-full, backup/restore, retention, and cleanup-failure coverage.
 2. Finalize administrator-run service UID/group provisioning, systemd lifecycle, operational logging, and cleanup documentation.
-3. Add protocol fuzzing and independent approval-signature verification before treating approvals as external consent.
+3. Add protocol fuzzing, field-by-field signature tampering tests, and independent review of the approval-authority identity/key custody before treating signatures as any evidence of human consent.
 4. Keep Docker and the existing build runner disconnected until the independent service identity and approval model have been reviewed.
