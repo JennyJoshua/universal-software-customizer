@@ -1,7 +1,7 @@
 # USC signed approval contract — Stage 1 design
 
 **Status:** design proposal for the synthetic-only runner prototype  
-**Execution status:** no signature verifier or signer is implemented by this document  
+**Execution status:** standalone Ed25519 verification is implemented for synthetic tests; broker integration and signer/consent capture are not implemented  
 **Customer repositories:** remain disabled
 
 ## 1. Security objective and boundary
