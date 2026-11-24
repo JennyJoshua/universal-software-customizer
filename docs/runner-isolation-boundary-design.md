@@ -211,10 +211,15 @@ On failure:
 - [x] Add a foreground broker CLI with fixed socket/state/UID arguments and graceful SIGTERM/SIGINT shutdown; add a guarded, hardened systemd example plus a host-provisioning runbook (Stage 1 service-lifecycle batch).
 - [ ] Validate the example on a separately approved dedicated host, including real systemd startup/stop, journaling, and cleanup ownership; no permanent service accounts or units are installed by this project.
 - [x] Specify the signed-approval contract: Ed25519, a trusted public key, canonical job-bound payload, kernel-UID binding, bounded validity window, nonce, replay persistence, and fail-closed verifier behavior (design only; see `docs/approval-signature-contract.md`).
-- [x] Implement standalone protocol-v2 envelope validation, canonical job-bound payload generation, configured-key fingerprinting, and fixed-path OpenSSL Ed25519 verification with trusted public-key file checks and kernel-peer UID binding (PR #98 verifier batch).
-- [ ] Integrate protocol v2 and signature verification into broker acceptance, and persist nonce replay identifiers atomically with request and approval IDs; until then the broker still accepts protocol v1 only.
-- [ ] Add protocol fuzzing and field-by-field signature/tampering tests.
+- [x] Implement standalone protocol-v2 envelope validation, canonical job-bound payload generation, configured-key fingerprinting, and fixed-path OpenSSL Ed25519 verification with trusted public-key file checks and kernel-peer UID binding (PR #99 verifier batch; CI #364 and #367 passed).
+- [x] Add a unique durable nonce ledger in SQLite schema v2; reject schema-v1 state rather than silently migrating it (PR #100; CI #369 passed).
+- [x] Integrate protocol-v2 signed submissions into broker acceptance; unsigned protocol-v1 submits are rejected while v1 status/cancel/result remain supported.
+- [x] Verify the configured Ed25519 signature, key fingerprint, expiry, and exact kernel-authenticated requester UID before acceptance.
+- [x] Atomically record the job, request ID, approval ID, and nonce in one broker-owned SQLite transaction; reject duplicate/replayed values and roll back on ledger failure.
+- [x] Extend ephemeral Linux CI with a separate approval-authority UID; verify its synthetic private key is unreadable by runner/control-plane identities and test signed submission plus request/approval/nonce replay after restart (PR #101; CI #371 passed).
+- [ ] Add protocol fuzzing and broader field-by-field signature/tampering/property tests; current tests cover selected critical fields and failure modes.
 - [ ] Independently verify that production control-plane identities cannot access real runner keys, persistent replay state, workspaces, or the Docker daemon.
+- [ ] Define and review a real authenticated approval-authority workflow; a valid signature proves only that the configured key signed the payload, not that a human consented.
   
 The CI identity test uses disposable accounts and synthetic key/database fixtures. It is evidence for the proposed permission model, not proof of production deployment security. Same-host process/account separation does not protect against host administrators or kernel compromise.
 
