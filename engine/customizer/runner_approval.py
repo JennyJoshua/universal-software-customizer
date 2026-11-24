@@ -26,7 +26,7 @@ MAX_SIGNATURE_BYTES = 64
 MAX_APPROVAL_TTL_SECONDS = 30 * 60
 MAX_FUTURE_ISSUE_SECONDS = 60
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_IMAGE = re.compile(r"^[^\\s@]+@sha256:[0-9a-f]{64}$")
+_IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
 _ENVELOPE = {"protocol_version", "request_id", "operation"}
 _JOB_FIELDS = {
     "source_snapshot_sha256",
