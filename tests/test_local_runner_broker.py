@@ -239,8 +239,8 @@ def test_broker_requires_durable_state_for_signed_submissions(tmp_path, approval
 
 
 
-def test_broker_rejects_replayed_status_request_id(running_broker):
-    submitted = send_local_request(running_broker.socket_path, submit_message())
+def test_broker_rejects_replayed_status_request_id(running_broker, approval_authority):
+    submitted = send_local_request(running_broker.socket_path, submit_message(approval_authority))
     request_id = str(uuid4())
     status_message = {
         "protocol_version": "1", "request_id": request_id,
