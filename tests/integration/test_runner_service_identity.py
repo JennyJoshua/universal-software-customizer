@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import shutil
@@ -12,6 +13,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+
+from customizer.runner_approval import canonical_approval_payload, public_key_id
 
 
 pytestmark = pytest.mark.skipif(
@@ -34,22 +37,45 @@ def _uid(username):
     return int(_sudo("id", "-u", username).stdout.strip())
 
 
-def _submit_message():
-    return {
-        "protocol_version": "1",
-        "request_id": str(uuid4()),
+def _submit_message(private_key, public_key, approver, requester_uid, public_dir, *, request_id=None, approval_id=None, nonce=None):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    message = {
+        "protocol_version": "2",
+        "request_id": request_id or str(uuid4()),
         "operation": "submit",
         "job": {
-            "approval_id": str(uuid4()),
             "source_snapshot_sha256": "c" * 64,
             "profile_id": "python-pytest",
             "build_image_digest": "python:3.12-slim@sha256:" + "a" * 64,
             "exporter_image_digest": "busybox@sha256:" + "b" * 64,
             "policy_version": "usc-runner-policy-v1",
-            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
             "release_authorized": False,
+            "approval": {
+                "approval_id": approval_id or str(uuid4()),
+                "issued_at": now.isoformat().replace("+00:00", "Z"),
+                "expires_at": (now + timedelta(minutes=5)).isoformat().replace("+00:00", "Z"),
+                "nonce": nonce or str(uuid4()),
+                "requester_uid": requester_uid,
+                "key_id": public_key_id(Path(public_key).read_bytes()),
+                "signature": base64.b64encode(b"0" * 64).decode("ascii"),
+            },
         },
     }
+    payload_path = Path(public_dir) / f"payload-{uuid4()}.bin"
+    signature_path = Path(public_dir) / f"signature-{uuid4()}.bin"
+    payload_path.write_bytes(canonical_approval_payload(message))
+    payload_path.chmod(0o644)
+    try:
+        _sudo(
+            "-u", approver, "--", "openssl", "pkeyutl", "-sign",
+            "-inkey", private_key, "-in", str(payload_path), "-rawin",
+            "-out", str(signature_path),
+        )
+        message["job"]["approval"]["signature"] = base64.b64encode(signature_path.read_bytes()).decode("ascii")
+    finally:
+        payload_path.unlink(missing_ok=True)
+        signature_path.unlink(missing_ok=True)
+    return message
 
 
 def test_runner_service_identity_is_separated_from_control_plane():
@@ -60,41 +86,56 @@ def test_runner_service_identity_is_separated_from_control_plane():
 
     suffix = uuid4().hex[:8]
     group = "uscg" + suffix
+    approval_group = "usca" + suffix
     runner = "uscr" + suffix
     client = "uscc" + suffix
     outsider = "usco" + suffix
+    approver = "uscp" + suffix
     base = tempfile.mkdtemp(prefix="usc-identity-")
     broker_process = None
     created_users = []
-    created_group = False
+    created_groups = []
 
     try:
-        _sudo("groupadd", group)
-        created_group = True
-        for username in (runner, client, outsider):
-            _sudo("useradd", "--no-create-home", "--shell", "/usr/sbin/nologin", "--gid", group, username)
+        for group_name in (group, approval_group):
+            _sudo("groupadd", group_name)
+            created_groups.append(group_name)
+        for username, primary_group in (
+            (runner, group), (client, group), (outsider, group), (approver, approval_group)
+        ):
+            _sudo("useradd", "--no-create-home", "--shell", "/usr/sbin/nologin", "--gid", primary_group, username)
             created_users.append(username)
 
         runner_uid = _uid(runner)
         client_uid = _uid(client)
+        outsider_uid = _uid(outsider)
+        approver_uid = _uid(approver)
         group_gid = int(_sudo("getent", "group", group).stdout.strip().split(":")[2])
 
         _sudo("chmod", "0755", base)
         socket_dir = os.path.join(base, "socket")
         state_dir = os.path.join(base, "state")
-        key_path = os.path.join(state_dir, "approval.key")
+        key_path = os.path.join(state_dir, "approval-public.pem")
+        approval_private_dir = os.path.join(base, "approval-private")
+        approval_public_dir = os.path.join(base, "approval-public")
+        private_key = os.path.join(approval_private_dir, "approval-private.pem")
+        public_key = os.path.join(approval_public_dir, "approval-public.pem")
         _sudo("install", "-d", "-o", runner, "-g", group, "-m", "2710", socket_dir)
         _sudo("install", "-d", "-o", runner, "-g", group, "-m", "0700", state_dir)
-        _sudo(
-            "-u", runner, "--", "python3", "-c",
-            "import os,sys; fd=os.open(sys.argv[1], os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600); os.write(fd,b'synthetic-fixture-only'); os.close(fd)",
-            key_path,
-        )
+        _sudo("install", "-d", "-o", approver, "-g", approval_group, "-m", "0700", approval_private_dir)
+        _sudo("install", "-d", "-o", approver, "-g", approval_group, "-m", "0755", approval_public_dir)
+        _sudo("-u", approver, "--", "openssl", "genpkey", "-algorithm", "ED25519", "-out", private_key)
+        _sudo("-u", approver, "--", "openssl", "pkey", "-in", private_key, "-pubout", "-out", public_key)
+        _sudo("install", "-o", runner, "-g", group, "-m", "0644", public_key, key_path)
 
         # The control-plane UID can traverse/connect through the group socket,
         # but cannot list the socket directory or read runner-private state.
         assert _sudo("-u", client, "--", "ls", socket_dir, check=False).returncode != 0
-        assert _sudo("-u", client, "--", "cat", key_path, check=False).returncode != 0
+        assert _sudo("-u", client, "--", "cat", key_path, check=False).returncode == 0
+        assert _sudo("-u", runner, "--", "cat", private_key, check=False).returncode != 0
+        assert _sudo("-u", client, "--", "cat", private_key, check=False).returncode != 0
+        assert _sudo("-u", outsider, "--", "cat", private_key, check=False).returncode != 0
+        assert _sudo("-u", approver, "--", "test", "-r", private_key, check=False).returncode == 0
 
         # The runner service identity is deliberately not a Docker administrator.
         runner_groups = _sudo("id", "-nG", runner).stdout.split()
@@ -125,7 +166,8 @@ def test_runner_service_identity_is_separated_from_control_plane():
                 ["sudo", "-n", "-u", runner, "--", "env", f"PYTHONPATH={repo_engine}",
                  "python3", "-m", "customizer.local_runner_broker",
                  "--socket", socket_path, "--socket-gid", str(group_gid),
-                 "--state-db", state_db_path, "--submitter-uid", str(client_uid)],
+                 "--state-db", state_db_path, "--approval-public-key", key_path,
+                 "--submitter-uid", str(client_uid)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -166,7 +208,9 @@ def test_runner_service_identity_is_separated_from_control_plane():
         assert state_stat == f"{runner_uid}:600"
         assert _sudo("-u", client, "--", "cat", state_db_path, check=False).returncode != 0
 
-        original_submission = _submit_message()
+        original_submission = _submit_message(
+            private_key, public_key, approver, client_uid, approval_public_dir,
+        )
         submitted = _sudo(
             "-u", client, "--", "env", f"PYTHONPATH={repo_engine}", "python3", "-c", client_code,
             socket_path, json.dumps(original_submission),
@@ -178,7 +222,9 @@ def test_runner_service_identity_is_separated_from_control_plane():
         # A different UID in the socket group can connect, but peer-UID policy denies it.
         denied = _sudo(
             "-u", outsider, "--", "env", f"PYTHONPATH={repo_engine}", "python3", "-c", client_code,
-            socket_path, json.dumps(_submit_message()),
+            socket_path, json.dumps(_submit_message(
+                private_key, public_key, approver, outsider_uid, approval_public_dir,
+            )),
         )
         rejected = json.loads(denied.stdout.strip())
         assert rejected["ok"] is False
@@ -215,8 +261,10 @@ def test_runner_service_identity_is_separated_from_control_plane():
         )
         assert json.loads(replayed_request.stdout.strip())["error"] == "Duplicate request ID."
 
-        replayed_approval = _submit_message()
-        replayed_approval["job"]["approval_id"] = original_submission["job"]["approval_id"]
+        replayed_approval = _submit_message(
+            private_key, public_key, approver, client_uid, approval_public_dir,
+            approval_id=original_submission["job"]["approval"]["approval_id"],
+        )
         replayed_approval_result = _sudo(
             "-u", client, "--", "env", f"PYTHONPATH={repo_engine}", "python3", "-c", client_code,
             socket_path, json.dumps(replayed_approval),
@@ -241,5 +289,5 @@ def test_runner_service_identity_is_separated_from_control_plane():
         _sudo("rm", "-rf", base, check=False)
         for username in reversed(created_users):
             _sudo("userdel", username, check=False)
-        if created_group:
-            _sudo("groupdel", group, check=False)
+        for group_name in reversed(created_groups):
+            _sudo("groupdel", group_name, check=False)
