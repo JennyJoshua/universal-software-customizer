@@ -71,10 +71,11 @@ def _submit_message(private_key, public_key, approver, requester_uid, public_dir
             "-inkey", private_key, "-in", str(payload_path), "-rawin",
             "-out", str(signature_path),
         )
+        _sudo("chmod", "0644", str(signature_path))
         message["job"]["approval"]["signature"] = base64.b64encode(signature_path.read_bytes()).decode("ascii")
     finally:
         payload_path.unlink(missing_ok=True)
-        signature_path.unlink(missing_ok=True)
+        _sudo("rm", "-f", str(signature_path), check=False)
     return message
 
 
@@ -271,6 +272,16 @@ def test_runner_service_identity_is_separated_from_control_plane():
             socket_path, json.dumps(replayed_approval),
         )
         assert "already been submitted" in json.loads(replayed_approval_result.stdout.strip())["error"]
+
+        replayed_nonce = _submit_message(
+            private_key, public_key, approver, client_uid, approval_public_dir,
+            nonce=original_submission["job"]["approval"]["nonce"],
+        )
+        replayed_nonce_result = _sudo(
+            "-u", client, "--", "env", f"PYTHONPATH={repo_engine}", "python3", "-c", client_code,
+            socket_path, json.dumps(replayed_nonce),
+        )
+        assert "nonce has already been used" in json.loads(replayed_nonce_result.stdout.strip())["error"]
 
         # Exercise the real CLI's graceful SIGTERM path: it stops accepting,
         # closes SQLite, and removes the socket after the active request ends.
