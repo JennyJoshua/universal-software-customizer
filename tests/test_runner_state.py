@@ -27,8 +27,8 @@ def test_state_database_is_created_with_private_owner_permissions(tmp_path):
         assert stat.S_ISREG(info.st_mode)
         assert info.st_uid == os.getuid()
         assert stat.S_IMODE(info.st_mode) == 0o600
-        assert info.st_nlink == 2
-        assert store._db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert info.st_nlink == 1
+        assert store._db.execute("PRAGMA user_version").fetchone()[0] == 2
     finally:
         store.close()
 
