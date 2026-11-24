@@ -211,7 +211,9 @@ On failure:
 - [x] Add a foreground broker CLI with fixed socket/state/UID arguments and graceful SIGTERM/SIGINT shutdown; add a guarded, hardened systemd example plus a host-provisioning runbook (Stage 1 service-lifecycle batch).
 - [ ] Validate the example on a separately approved dedicated host, including real systemd startup/stop, journaling, and cleanup ownership; no permanent service accounts or units are installed by this project.
 - [x] Specify the signed-approval contract: Ed25519, a trusted public key, canonical job-bound payload, kernel-UID binding, bounded validity window, nonce, replay persistence, and fail-closed verifier behavior (design only; see `docs/approval-signature-contract.md`).
-- [ ] Implement protocol v2 and broker-side signature verification; the current broker still treats approval IDs as replay identifiers, not proof of human consent.
+- [x] Implement standalone strict protocol-v2 envelope validation, bounded Ed25519 signature encoding, canonical job-bound payload generation, and configured-key fingerprinting (protocol-v2 contract batch).
+- [x] Implement a fixed-path OpenSSL Ed25519 verifier with bounded execution, trusted public-key file checks, kernel-peer UID binding, private temporary signature handling, and fail-closed behavior (verifier batch; broker integration remains separate).
+- [ ] Integrate protocol v2 and signature verification into broker acceptance, and persist nonce replay identifiers atomically with request and approval IDs; until then the broker still accepts protocol v1 only.
 - [ ] Add protocol fuzzing and field-by-field signature/tampering tests.
 - [ ] Independently verify that production control-plane identities cannot access real runner keys, persistent replay state, workspaces, or the Docker daemon.
   
