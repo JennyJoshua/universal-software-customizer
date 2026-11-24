@@ -61,7 +61,7 @@ def signed_message(private: Path, public: Path):
             },
         },
     }
-    payload = canonical_approval_payload(message)
+    payload = canonical_approval_payload(message, now=NOW)
     payload_path = private.parent / "approval-payload.bin"
     payload_path.write_bytes(payload)
     payload_path.chmod(0o600)
