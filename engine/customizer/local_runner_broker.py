@@ -65,7 +65,7 @@ def _decode_broker_message(raw):
         raise ProtocolError("Protocol message exceeds the byte limit.")
     try:
         header = json.loads(raw.decode("utf-8", errors="strict") if isinstance(raw, bytes) else raw)
-    except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, RecursionError):
         return decode_message(raw)
     if isinstance(header, dict) and header.get("protocol_version") == "2":
         return decode_approval_message(raw)
