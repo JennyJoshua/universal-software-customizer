@@ -162,11 +162,16 @@ class RunnerStateStore:
 
     def record_nonce(self, nonce):
         if self._db is None:
+            if nonce in self._nonce_ids:
+                raise ProtocolError("Nonce has already been used.")
             self._nonce_ids.add(nonce)
         else:
-            self._db.execute(
-                "INSERT INTO seen_nonces(nonce) VALUES (?)", (nonce,)
-            )
+            try:
+                self._db.execute(
+                    "INSERT INTO seen_nonces(nonce) VALUES (?)", (nonce,)
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ProtocolError("Nonce has already been used.") from exc
 
     def job_count(self):
         if self._db is None:
