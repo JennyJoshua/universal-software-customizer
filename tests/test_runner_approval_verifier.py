@@ -166,3 +166,28 @@ def test_rejects_non_absolute_public_key_path(signed_fixture):
             message, public_key_path=Path(public.name),
             state_directory=state_dir, peer_uid=os.getuid(), now=NOW,
         )
+
+
+
+def test_rejects_hardlinked_public_key(signed_fixture, tmp_path):
+    message, public, state_dir = signed_fixture
+    alias = tmp_path / "public-key-hardlink.pem"
+    os.link(public, alias)
+    with pytest.raises(ProtocolError, match="single-link"):
+        verify(message, alias, state_dir)
+
+
+def test_rejects_oversized_public_key_file(signed_fixture):
+    message, public, state_dir = signed_fixture
+    public.write_bytes(b"x" * 4097)
+    public.chmod(0o600)
+    with pytest.raises(ProtocolError, match="4 KiB"):
+        verify(message, public, state_dir)
+
+
+def test_rejects_fifo_public_key_without_blocking(signed_fixture, tmp_path):
+    message, _public, state_dir = signed_fixture
+    fifo = tmp_path / "public-key.fifo"
+    os.mkfifo(fifo, 0o600)
+    with pytest.raises(ProtocolError, match="regular file"):
+        verify(message, fifo, state_dir)
