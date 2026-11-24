@@ -28,7 +28,7 @@ def test_state_database_is_created_with_private_owner_permissions(tmp_path):
         assert info.st_uid == os.getuid()
         assert stat.S_IMODE(info.st_mode) == 0o600
         assert info.st_nlink == 1
-        assert store._db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert store._db.execute("PRAGMA user_version").fetchone()[0] == 2
     finally:
         store.close()
 
@@ -85,6 +85,7 @@ def test_state_database_persists_jobs_and_replay_ids_across_store_restart(tmp_pa
     with first.transaction():
         first.create_job("job-fixture-1", job)
         first.record_request("request-fixture-1")
+        first.record_nonce("nonce-fixture-1")
     first.close()
 
     second = RunnerStateStore(path)
@@ -93,7 +94,11 @@ def test_state_database_persists_jobs_and_replay_ids_across_store_restart(tmp_pa
         assert second.job_count() == 1
         assert second.request_count() == 1
         assert second.request_seen("request-fixture-1")
+        assert second.nonce_seen("nonce-fixture-1")
         assert second.approval_seen("approval-fixture-1")
+        with pytest.raises(ProtocolError):
+            with second.transaction():
+                second.record_nonce("nonce-fixture-1")
         assert second.get_job("job-fixture-1") == job
     finally:
         second.close()
@@ -132,4 +137,16 @@ def test_state_database_rejects_corrupt_existing_database(tmp_path):
     path.write_bytes(b"not-a-sqlite-database")
     path.chmod(0o600)
     with pytest.raises(ProtocolError, match="database"):
+        RunnerStateStore(path).start()
+
+
+
+def test_state_database_rejects_legacy_schema_v1_without_implicit_migration(tmp_path):
+    state_dir = _private_state_dir(tmp_path)
+    path = state_dir / "broker.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA user_version=1")
+    connection.close()
+    path.chmod(0o600)
+    with pytest.raises(ProtocolError, match="explicit state reset"):
         RunnerStateStore(path).start()

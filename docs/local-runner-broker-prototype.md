@@ -15,7 +15,7 @@ The prototype broker:
 - Applies separate submitter and operator UID allowlists. Status, cancel, and result operations are checked against the job owner's UID or an operator UID for every request. Group membership permits connecting only; kernel-reported UID authorization remains mandatory.
 - Accepts only the strict protocol contract defined in `customizer.runner_protocol`.
 - Default private development mode may use in-memory state. Group-access mode requires a durable SQLite database in a service-owned 0700 directory; the database is service-owned mode 0600.
-- SQLite uses explicit transactions, a unique approval-ID constraint, a unique request-ID ledger, full synchronous commits, a rollback journal, schema versioning, and a startup integrity check. Job status and replay IDs survive normal restarts.
+- SQLite uses explicit transactions, unique approval-ID and request-ID constraints, a unique nonce replay ledger (schema v2), full synchronous commits, a rollback journal, and a startup integrity check. Job status and all replay IDs survive normal restarts. Schema v1 databases are rejected; this prototype requires an explicit state reset rather than silently migrating older state.
 - The ephemeral CI test kills the broker process after a committed job, restarts it against the same database, verifies stale-socket recovery, checks the job state, and confirms request/approval replays remain rejected.
 - Exposes status/cancel/result metadata only. It does not return artifacts.
 
