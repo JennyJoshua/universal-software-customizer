@@ -210,7 +210,7 @@ def test_broker_fails_closed_when_private_directory_permissions_are_open(tmp_pat
 
 
 def test_broker_returns_no_artifacts_and_never_claims_execution(running_broker, approval_authority):
-    submitted = send_local_request(running_broker.socket_path, submit_message())
+    submitted = send_local_request(running_broker.socket_path, submit_message(approval_authority))
     result = send_local_request(running_broker.socket_path, {
         "protocol_version": "1", "request_id": str(uuid4()),
         "operation": "result", "job_id": submitted["job_id"],
@@ -395,3 +395,89 @@ def test_request_stop_finishes_accept_loop_before_close_removes_socket(tmp_path)
     finally:
         broker.close()
     assert not broker.socket_path.exists()
+
+
+
+def test_broker_rejects_unsigned_protocol_v1_submit(running_broker):
+    response = send_local_request(running_broker.socket_path, legacy_submit_message())
+    assert response["ok"] is False
+    assert response["error"] == "Unsigned protocol-v1 submissions are disabled."
+
+
+def test_broker_rejects_signed_payload_tampering(running_broker, approval_authority):
+    message = submit_message(approval_authority)
+    message["job"]["source_snapshot_sha256"] = "e" * 64
+    response = send_local_request(running_broker.socket_path, message)
+    assert response["ok"] is False
+    assert response["error"] == "Ed25519 approval signature is invalid."
+
+
+def test_broker_blocks_nonce_replay_independently_of_approval_id(running_broker, approval_authority):
+    nonce = str(uuid4())
+    first = send_local_request(running_broker.socket_path, submit_message(approval_authority, nonce=nonce))
+    assert first["ok"] is True
+    replay = send_local_request(running_broker.socket_path, submit_message(approval_authority, nonce=nonce))
+    assert replay["ok"] is False
+    assert replay["error"] == "Approval nonce has already been used."
+
+
+def test_broker_requires_configured_public_key(tmp_path, approval_authority):
+    socket_dir = tmp_path / "socket"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(mode=0o700)
+    state_dir.chmod(0o700)
+    broker = LocalRunnerBroker(
+        socket_dir / "runner.sock",
+        submitter_uids={os.getuid()},
+        state_db_path=state_dir / "broker.sqlite3",
+    )
+    broker.start()
+    thread = threading.Thread(target=broker.serve_forever, daemon=True)
+    thread.start()
+    try:
+        response = send_local_request(broker.socket_path, submit_message(approval_authority))
+        assert response["ok"] is False
+        assert "configured trusted approval public key" in response["error"]
+    finally:
+        broker.close()
+        thread.join(timeout=2)
+
+
+def test_broker_restart_preserves_signed_job_and_replay_state(tmp_path, approval_authority):
+    socket_dir = tmp_path / "socket"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(mode=0o700)
+    state_dir.chmod(0o700)
+    socket_path = socket_dir / "runner.sock"
+    state_db = state_dir / "broker.sqlite3"
+    message = submit_message(approval_authority)
+    first = LocalRunnerBroker(
+        socket_path, submitter_uids={os.getuid()},
+        state_db_path=state_db, approval_public_key_path=approval_authority["public"],
+    )
+    first.start()
+    thread1 = threading.Thread(target=first.serve_forever, daemon=True)
+    thread1.start()
+    accepted = send_local_request(socket_path, message)
+    assert accepted["ok"] is True
+    first.close()
+    thread1.join(timeout=2)
+
+    second = LocalRunnerBroker(
+        socket_path, submitter_uids={os.getuid()},
+        state_db_path=state_db, approval_public_key_path=approval_authority["public"],
+    )
+    second.start()
+    thread2 = threading.Thread(target=second.serve_forever, daemon=True)
+    thread2.start()
+    try:
+        status = send_local_request(socket_path, {
+            "protocol_version": "1", "request_id": str(uuid4()),
+            "operation": "status", "job_id": accepted["job_id"],
+        })
+        assert status["ok"] is True and status["state"] == "queued"
+        replay = send_local_request(socket_path, message)
+        assert replay["ok"] is False and "Duplicate request ID" in replay["error"]
+    finally:
+        second.close()
+        thread2.join(timeout=2)
