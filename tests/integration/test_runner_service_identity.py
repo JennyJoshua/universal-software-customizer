@@ -63,7 +63,7 @@ def _submit_message(private_key, public_key, approver, requester_uid, public_dir
     }
     payload_path = Path(public_dir) / f"payload-{uuid4()}.bin"
     signature_path = Path(public_dir) / f"signature-{uuid4()}.bin"
-    payload_path.write_bytes(canonical_approval_payload(message))
+    payload_path.write_bytes(canonical_approval_payload(message, now=now))
     payload_path.chmod(0o644)
     try:
         _sudo(
