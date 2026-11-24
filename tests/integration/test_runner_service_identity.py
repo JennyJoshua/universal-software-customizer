@@ -123,7 +123,7 @@ def test_runner_service_identity_is_separated_from_control_plane():
         _sudo("install", "-d", "-o", runner, "-g", group, "-m", "2710", socket_dir)
         _sudo("install", "-d", "-o", runner, "-g", group, "-m", "0700", state_dir)
         _sudo("install", "-d", "-o", approver, "-g", approval_group, "-m", "0700", approval_private_dir)
-        _sudo("install", "-d", "-o", approver, "-g", approval_group, "-m", "0755", approval_public_dir)
+        _sudo("install", "-d", "-o", approver, "-g", approval_group, "-m", "1777", approval_public_dir)
         _sudo("-u", approver, "--", "openssl", "genpkey", "-algorithm", "ED25519", "-out", private_key)
         _sudo("-u", approver, "--", "openssl", "pkey", "-in", private_key, "-pubout", "-out", public_key)
         _sudo("install", "-o", runner, "-g", group, "-m", "0644", public_key, key_path)
@@ -131,7 +131,7 @@ def test_runner_service_identity_is_separated_from_control_plane():
         # The control-plane UID can traverse/connect through the group socket,
         # but cannot list the socket directory or read runner-private state.
         assert _sudo("-u", client, "--", "ls", socket_dir, check=False).returncode != 0
-        assert _sudo("-u", client, "--", "cat", key_path, check=False).returncode == 0
+        assert _sudo("-u", runner, "--", "cat", key_path, check=False).returncode == 0
         assert _sudo("-u", runner, "--", "cat", private_key, check=False).returncode != 0
         assert _sudo("-u", client, "--", "cat", private_key, check=False).returncode != 0
         assert _sudo("-u", outsider, "--", "cat", private_key, check=False).returncode != 0
@@ -142,6 +142,7 @@ def test_runner_service_identity_is_separated_from_control_plane():
         client_groups = _sudo("id", "-nG", client).stdout.split()
         assert "docker" not in runner_groups
         assert "docker" not in client_groups
+        assert "docker" not in _sudo("id", "-nG", approver).stdout.split()
         docker_socket = "/var/run/docker.sock"
         if _sudo("test", "-S", docker_socket, check=False).returncode == 0:
             assert _sudo("-u", runner, "--", "test", "-r", docker_socket, check=False).returncode != 0
