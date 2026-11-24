@@ -154,7 +154,7 @@ def test_canonical_payload_rejects_mutated_message_and_verifier_fails_before_key
     message = valid_v2_message()
     message["job"]["release_authorized"] = True
     with pytest.raises(ProtocolError):
-        canonical_approval_payload(message)
+        canonical_approval_payload(message, now=NOW)
 
     def forbidden(*_args, **_kwargs):
         raise AssertionError("OpenSSL must not run for an invalid approval envelope.")
