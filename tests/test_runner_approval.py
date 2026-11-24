@@ -63,7 +63,7 @@ def test_accepts_v2_signed_submit_and_builds_canonical_payload():
 
 def test_canonical_payload_is_stable_and_independent_of_transport_request_id():
     message = approval_message()
-    first = decode_approval_message(message and json.dumps(message), now=NOW)
+    first = decode_approval_message(json.dumps(message), now=NOW)
     altered_transport = copy.deepcopy(message)
     altered_transport["request_id"] = str(uuid4())
     second = decode_approval_message(json.dumps(altered_transport), now=NOW)
