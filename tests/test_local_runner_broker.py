@@ -1,29 +1,90 @@
 from __future__ import annotations
+import base64
 import os
 import socket
 import stat
+import subprocess
 import threading
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 import pytest
 from customizer.local_runner_broker import LocalRunnerBroker, send_local_request
-from customizer.runner_protocol import POLICY_VERSION
+from customizer.runner_approval import canonical_approval_payload, public_key_id
 
 IMAGE = "python:3.12-slim@sha256:" + "a" * 64
 EXPORTER = "busybox@sha256:" + "b" * 64
 
 
-def submit_message(*, request_id=None, approval_id=None):
-    return {
-        "protocol_version": "1", "request_id": request_id or str(uuid4()),
+@pytest.fixture(scope="session")
+def approval_authority(tmp_path_factory):
+    directory = tmp_path_factory.mktemp("usc-approval-authority")
+    private = directory / "approval-private.pem"
+    public = directory / "approval-public.pem"
+    subprocess.run(
+        ["/usr/bin/openssl", "genpkey", "-algorithm", "ED25519", "-out", str(private)],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["/usr/bin/openssl", "pkey", "-in", str(private), "-pubout", "-out", str(public)],
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    private.chmod(0o600)
+    public.chmod(0o600)
+    return {"directory": directory, "private": private, "public": public}
+
+
+def submit_message(authority, *, request_id=None, approval_id=None, nonce=None, requester_uid=None):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    message = {
+        "protocol_version": "2",
+        "request_id": request_id or str(uuid4()),
         "operation": "submit",
         "job": {
-            "approval_id": approval_id or str(uuid4()),
             "source_snapshot_sha256": "c" * 64,
             "profile_id": "python-pytest",
             "build_image_digest": IMAGE,
             "exporter_image_digest": EXPORTER,
-            "policy_version": POLICY_VERSION,
+            "policy_version": "usc-runner-policy-v1",
+            "release_authorized": False,
+            "approval": {
+                "approval_id": approval_id or str(uuid4()),
+                "issued_at": now.isoformat().replace("+00:00", "Z"),
+                "expires_at": (now + timedelta(minutes=5)).isoformat().replace("+00:00", "Z"),
+                "nonce": nonce or str(uuid4()),
+                "requester_uid": os.getuid() if requester_uid is None else requester_uid,
+                "key_id": public_key_id(authority["public"].read_bytes()),
+                "signature": base64.b64encode(b"0" * 64).decode("ascii"),
+            },
+        },
+    }
+    payload_path = authority["directory"] / f"payload-{uuid4()}.bin"
+    payload_path.write_bytes(canonical_approval_payload(message))
+    payload_path.chmod(0o600)
+    try:
+        result = subprocess.run(
+            ["/usr/bin/openssl", "pkeyutl", "-sign", "-inkey", str(authority["private"]),
+             "-in", str(payload_path), "-rawin"],
+            check=True, capture_output=True,
+        )
+    finally:
+        payload_path.unlink(missing_ok=True)
+    message["job"]["approval"]["signature"] = base64.b64encode(result.stdout).decode("ascii")
+    return message
+
+
+def legacy_submit_message():
+    return {
+        "protocol_version": "1",
+        "request_id": str(uuid4()),
+        "operation": "submit",
+        "job": {
+            "approval_id": str(uuid4()),
+            "source_snapshot_sha256": "c" * 64,
+            "profile_id": "python-pytest",
+            "build_image_digest": IMAGE,
+            "exporter_image_digest": EXPORTER,
+            "policy_version": "usc-runner-policy-v1",
             "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
             "release_authorized": False,
         },
@@ -31,9 +92,17 @@ def submit_message(*, request_id=None, approval_id=None):
 
 
 @pytest.fixture
-def running_broker(tmp_path):
+def running_broker(tmp_path, approval_authority):
     socket_dir = tmp_path / "private"
-    broker = LocalRunnerBroker(socket_dir / "runner.sock", submitter_uids={os.getuid()})
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(mode=0o700)
+    state_dir.chmod(0o700)
+    broker = LocalRunnerBroker(
+        socket_dir / "runner.sock",
+        submitter_uids={os.getuid()},
+        state_db_path=state_dir / "broker.sqlite3",
+        approval_public_key_path=approval_authority["public"],
+    )
     broker.start()
     thread = threading.Thread(target=broker.serve_forever, daemon=True)
     thread.start()
@@ -54,8 +123,8 @@ def test_broker_socket_directory_and_socket_are_private(running_broker):
     assert endpoint.st_uid == os.getuid()
 
 
-def test_broker_accepts_synthetic_submit_and_supports_status_cancel_result(running_broker):
-    submitted = send_local_request(running_broker.socket_path, submit_message())
+def test_broker_accepts_signed_submit_and_supports_status_cancel_result(running_broker, approval_authority):
+    submitted = send_local_request(running_broker.socket_path, submit_message(approval_authority))
     assert submitted["ok"] is True
     job_id = submitted["job_id"]
     assert submitted["state"] == "queued"
@@ -76,8 +145,8 @@ def test_broker_accepts_synthetic_submit_and_supports_status_cancel_result(runni
     assert cancelled["ok"] is True and cancelled["state"] == "cancelled"
 
 
-def test_broker_rejects_unknown_fields_and_unknown_jobs(running_broker):
-    malformed = submit_message()
+def test_broker_rejects_unknown_fields_and_unknown_jobs(running_broker, approval_authority):
+    malformed = submit_message(approval_authority)
     malformed["job"]["source_path"] = "/etc"
     response = send_local_request(running_broker.socket_path, malformed)
     assert response["ok"] is False and "unknown fields" in response["error"]
@@ -88,22 +157,22 @@ def test_broker_rejects_unknown_fields_and_unknown_jobs(running_broker):
     assert unknown["ok"] is False and unknown["error"] == "Unknown job or unauthorized operation."
 
 
-def test_broker_blocks_duplicate_request_and_approval_replay(running_broker):
+def test_broker_blocks_duplicate_request_and_approval_replay(running_broker, approval_authority):
     request_id, approval_id = str(uuid4()), str(uuid4())
     first = send_local_request(running_broker.socket_path,
-                               submit_message(request_id=request_id, approval_id=approval_id))
+                               submit_message(approval_authority, request_id=request_id, approval_id=approval_id))
     assert first["ok"] is True
     replay_request = send_local_request(running_broker.socket_path,
-                                        submit_message(request_id=request_id))
+                                        submit_message(approval_authority, request_id=request_id))
     assert replay_request["ok"] is False and "Duplicate request ID" in replay_request["error"]
     replay_approval = send_local_request(running_broker.socket_path,
-                                         submit_message(approval_id=approval_id))
+                                         submit_message(approval_authority, approval_id=approval_id))
     assert replay_approval["ok"] is False and "already been submitted" in replay_approval["error"]
 
 
-def test_broker_uses_kernel_peer_uid_not_caller_supplied_field(running_broker, monkeypatch):
+def test_broker_uses_kernel_peer_uid_not_caller_supplied_field(running_broker, approval_authority, monkeypatch):
     import customizer.local_runner_broker as broker_module
-    submitted = send_local_request(running_broker.socket_path, submit_message())
+    submitted = send_local_request(running_broker.socket_path, submit_message(approval_authority))
     assert submitted["ok"] is True
     monkeypatch.setattr(broker_module, "_peer_uid", lambda _connection: os.getuid() + 10000)
     response = send_local_request(running_broker.socket_path, {
@@ -140,7 +209,7 @@ def test_broker_fails_closed_when_private_directory_permissions_are_open(tmp_pat
         broker.start()
 
 
-def test_broker_returns_no_artifacts_and_never_claims_execution(running_broker):
+def test_broker_returns_no_artifacts_and_never_claims_execution(running_broker, approval_authority):
     submitted = send_local_request(running_broker.socket_path, submit_message())
     result = send_local_request(running_broker.socket_path, {
         "protocol_version": "1", "request_id": str(uuid4()),
@@ -150,28 +219,23 @@ def test_broker_returns_no_artifacts_and_never_claims_execution(running_broker):
                       "state": "queued", "result_available": False}
 
 
-def test_broker_restart_loses_in_memory_jobs_by_design(tmp_path):
+def test_broker_requires_durable_state_for_signed_submissions(tmp_path, approval_authority):
     socket_path = tmp_path / "private" / "runner.sock"
-    first = LocalRunnerBroker(socket_path, submitter_uids={os.getuid()})
-    first.start()
-    thread1 = threading.Thread(target=first.serve_forever, daemon=True)
-    thread1.start()
-    submitted = send_local_request(socket_path, submit_message())
-    first.close()
-    thread1.join(timeout=2)
-    second = LocalRunnerBroker(socket_path, submitter_uids={os.getuid()})
-    second.start()
-    thread2 = threading.Thread(target=second.serve_forever, daemon=True)
-    thread2.start()
+    broker = LocalRunnerBroker(
+        socket_path,
+        submitter_uids={os.getuid()},
+        approval_public_key_path=approval_authority["public"],
+    )
+    broker.start()
+    thread = threading.Thread(target=broker.serve_forever, daemon=True)
+    thread.start()
     try:
-        status = send_local_request(socket_path, {
-            "protocol_version": "1", "request_id": str(uuid4()),
-            "operation": "status", "job_id": submitted["job_id"],
-        })
-        assert status["ok"] is False and status["error"] == "Unknown job or unauthorized operation."
+        response = send_local_request(socket_path, submit_message(approval_authority))
+        assert response["ok"] is False
+        assert "durable state" in response["error"]
     finally:
-        second.close()
-        thread2.join(timeout=2)
+        broker.close()
+        thread.join(timeout=2)
 
 
 
@@ -188,10 +252,10 @@ def test_broker_rejects_replayed_status_request_id(running_broker):
     assert replay["error"] == "Duplicate request ID."
 
 
-def test_broker_enforces_in_memory_capacity_limit(running_broker, monkeypatch):
+def test_broker_enforces_durable_capacity_limit(running_broker, approval_authority, monkeypatch):
     import customizer.local_runner_broker as broker_module
     monkeypatch.setattr(broker_module, "MAX_JOBS", 0)
-    response = send_local_request(running_broker.socket_path, submit_message())
+    response = send_local_request(running_broker.socket_path, submit_message(approval_authority))
     assert response["ok"] is False
     assert response["error"] == "Broker job capacity has been reached."
 
@@ -282,7 +346,7 @@ def test_group_socket_mode_requires_durable_state_database(tmp_path):
 
 
 
-def test_broker_submit_transaction_rolls_back_job_if_replay_record_fails(tmp_path, monkeypatch):
+def test_broker_submit_transaction_rolls_back_job_if_nonce_record_fails(tmp_path, approval_authority, monkeypatch):
     socket_dir = tmp_path / "socket"
     socket_dir.mkdir(mode=0o700)
     socket_dir.chmod(0o700)
@@ -293,20 +357,23 @@ def test_broker_submit_transaction_rolls_back_job_if_replay_record_fails(tmp_pat
         socket_dir / "runner.sock",
         submitter_uids={os.getuid()},
         state_db_path=state_dir / "broker.sqlite3",
+        approval_public_key_path=approval_authority["public"],
     )
     broker.start()
-    message = submit_message()
+    message = submit_message(approval_authority)
 
-    def fail_record(_request_id):
-        raise RuntimeError("injected replay-ledger write failure")
+    def fail_record(_nonce):
+        raise RuntimeError("injected nonce-ledger write failure")
 
-    monkeypatch.setattr(broker._state, "record_request", fail_record)
+    monkeypatch.setattr(broker._state, "record_nonce", fail_record)
     try:
         with pytest.raises(RuntimeError, match="injected"):
             broker._dispatch(os.getuid(), message)
         assert broker._state.job_count() == 0
-        assert not broker._state.approval_seen(message["job"]["approval_id"])
+        approval = message["job"]["approval"]
+        assert not broker._state.approval_seen(approval["approval_id"])
         assert not broker._state.request_seen(message["request_id"])
+        assert not broker._state.nonce_seen(approval["nonce"])
     finally:
         broker.close()
 
