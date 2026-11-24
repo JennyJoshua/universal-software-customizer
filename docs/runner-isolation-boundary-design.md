@@ -213,8 +213,9 @@ On failure:
 - [x] Specify the signed-approval contract: Ed25519, a trusted public key, canonical job-bound payload, kernel-UID binding, bounded validity window, nonce, replay persistence, and fail-closed verifier behavior (design only; see `docs/approval-signature-contract.md`).
 - [x] Implement standalone protocol-v2 envelope validation, canonical job-bound payload generation, configured-key fingerprinting, and fixed-path OpenSSL Ed25519 verification with trusted public-key file checks and kernel-peer UID binding (PR #98 verifier batch).
 - [ ] Integrate protocol v2 and signature verification into broker acceptance, and persist nonce replay identifiers atomically with request and approval IDs; until then the broker still accepts protocol v1 only.
-- [ ] Add protocol fuzzing and field-by-field signature/tampering tests.
+- [ ] Add protocol fuzzing and broader field-by-field signature/tampering/property tests; current tests cover selected critical fields and failure modes.
 - [ ] Independently verify that production control-plane identities cannot access real runner keys, persistent replay state, workspaces, or the Docker daemon.
+- [ ] Define and review a real authenticated approval-authority workflow; a valid signature proves only that the configured key signed the payload, not that a human consented.
   
 The CI identity test uses disposable accounts and synthetic key/database fixtures. It is evidence for the proposed permission model, not proof of production deployment security. Same-host process/account separation does not protect against host administrators or kernel compromise.
 
