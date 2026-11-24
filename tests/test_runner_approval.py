@@ -96,7 +96,7 @@ def test_rejects_duplicate_keys_invalid_utf8_and_oversized_payload():
     with pytest.raises(ProtocolError, match="Duplicate"):
         decode_approval_message(b'{"protocol_version":"2","protocol_version":"2"}', now=NOW)
     with pytest.raises(ProtocolError, match="UTF-8"):
-        decode_approval_message(b"\\xff", now=NOW)
+        decode_approval_message(bytes([255]), now=NOW)
     with pytest.raises(ProtocolError, match="byte limit"):
         decode_approval_message(b" " * (16 * 1024 + 1), now=NOW)
 
@@ -119,7 +119,7 @@ def test_rejects_non_utc_time_and_expiry_before_issue():
 
 
 def test_public_key_id_hashes_exact_pem_bytes():
-    pem = b"-----BEGIN PUBLIC KEY-----\\nsynthetic\\n-----END PUBLIC KEY-----\\n"
+    pem = b"synthetic public key bytes\n"
     assert public_key_id(pem) == public_key_id(pem)
     assert public_key_id(pem) != public_key_id(pem + b" ")
     with pytest.raises(ProtocolError):
