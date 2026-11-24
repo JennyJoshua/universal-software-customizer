@@ -1,7 +1,7 @@
 # USC signed approval contract — Stage 1 design
 
 **Status:** design proposal for the synthetic-only runner prototype  
-**Execution status:** no signature verifier or signer is implemented by this document  
+**Execution status:** standalone Ed25519 verification is implemented for synthetic tests; broker integration and signer/consent capture are not implemented  
 **Customer repositories:** remain disabled
 
 ## 1. Security objective and boundary
@@ -16,10 +16,10 @@ A valid signature proves that the configured key signed the canonical approval p
 
 - Signature algorithm: Ed25519.
 - Verification utility: OpenSSL `pkeyutl`, invoked through a fixed absolute executable path (`/usr/bin/openssl`).
-- Use `pkeyutl -verify -pubin -inkey <trusted-public-key> -sigfile <temporary-signature> -rawin`; the canonical payload is supplied on standard input.
+- Use `pkeyutl -verify -pubin -inkey <trusted-public-key> -sigfile <temporary-signature> -in <temporary-payload> -rawin`; OpenSSL's Ed25519 one-shot operation requires seekable input files.
 - No shell, caller-supplied executable, caller-supplied file path, or generic command interface is permitted.
 - The verifier uses a short timeout, bounded payload/signature sizes, fixed environment, closed inherited file descriptors, and suppressed subprocess output.
-- Temporary signature bytes are written to a 0600 file in the runner-private 0700 state directory and removed after verification.
+- OpenSSL's Ed25519 one-shot operation requires a seekable input file. The canonical payload and signature are therefore each written to separate 0600 temporary files in the runner-private 0700 state directory and removed after verification. No payload or signature is passed through a shell or caller-selected path.
 - Missing OpenSSL, unsupported key format, timeout, invalid signature, or any verifier error fails closed. There is no unsigned fallback.
 
 OpenSSL's `pkeyutl` documentation describes Ed25519/Ed448 raw-message signing and verification and the `-rawin` option: https://docs.openssl.org/3.3/man1/openssl-pkeyutl/

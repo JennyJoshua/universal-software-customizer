@@ -10,8 +10,13 @@ import base64
 import binascii
 import hashlib
 import json
+import os
 import re
+import stat
+import subprocess
+import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID
 
 from .runner_protocol import (
@@ -210,3 +215,154 @@ def public_key_id(pem_bytes: bytes) -> str:
     if not isinstance(pem_bytes, bytes) or not pem_bytes or len(pem_bytes) > 4096:
         raise ProtocolError("Trusted public key must be non-empty PEM bytes no larger than 4 KiB.")
     return hashlib.sha256(pem_bytes).hexdigest()
+
+
+
+OPENSSL_BINARY = "/usr/bin/openssl"
+OPENSSL_TIMEOUT_SECONDS = 3.0
+
+
+def _read_trusted_public_key(path: str | os.PathLike[str]) -> tuple[int, bytes]:
+    """Open a configured public key without following a final-component symlink."""
+    key_path = Path(path)
+    if not key_path.is_absolute():
+        raise ProtocolError("Trusted public-key path must be absolute.")
+    flags = (os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+             | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    try:
+        fd = os.open(key_path, flags)
+    except OSError as exc:
+        raise ProtocolError("Could not safely open the configured trusted public key.") from exc
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or info.st_size <= 0 or info.st_size > 4096
+                or info.st_uid not in {0, os.getuid()}
+                or stat.S_IMODE(info.st_mode) & 0o022):
+            raise ProtocolError("Trusted public key must be a single-link, non-writable regular file no larger than 4 KiB.")
+        chunks = []
+        total = 0
+        while True:
+            chunk = os.read(fd, min(1024, 4097 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > 4096:
+                raise ProtocolError("Trusted public key exceeds the 4 KiB limit.")
+            chunks.append(chunk)
+        pem = b"".join(chunks)
+        if not pem:
+            raise ProtocolError("Trusted public key is empty.")
+        os.lseek(fd, 0, os.SEEK_SET)
+        return fd, pem
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _validate_private_state_directory(path: str | os.PathLike[str]) -> Path:
+    directory = Path(path)
+    if not directory.is_absolute() or directory.is_symlink():
+        raise ProtocolError("Signature temporary directory must be an absolute, non-symlink path.")
+    try:
+        info = directory.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ProtocolError("Could not inspect signature temporary directory.") from exc
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise ProtocolError("Signature temporary directory must be service-owned and private (0700).")
+    return directory
+
+
+def verify_ed25519_approval(
+    message: dict,
+    *,
+    public_key_path: str | os.PathLike[str],
+    state_directory: str | os.PathLike[str],
+    peer_uid: int,
+    now: datetime | None = None,
+) -> bool:
+    """Verify one validated protocol-v2 approval using the fixed host OpenSSL binary.
+
+    The caller must still perform operation allowlisting and durable replay writes
+    in the same transaction as job acceptance. This function does not record replay.
+    """
+    if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid <= 0:
+        raise ProtocolError("Submitting peer identity is invalid or privileged.")
+    validated = decode_approval_message(
+        json.dumps(message, separators=(",", ":"), ensure_ascii=True, allow_nan=False),
+        now=now,
+    )
+    approval = validated["job"]["approval"]
+    if approval["requester_uid"] != peer_uid:
+        raise ProtocolError("Signed requester UID does not match the authenticated socket peer.")
+    try:
+        key_fd, pem = _read_trusted_public_key(public_key_path)
+    except (TypeError, ValueError) as exc:
+        if isinstance(exc, ProtocolError):
+            raise
+        raise ProtocolError("Trusted public key configuration is invalid.") from exc
+
+    signature = base64.b64decode(approval["signature"], validate=True)
+    signature_path = None
+    try:
+        if public_key_id(pem) != approval["key_id"]:
+            raise ProtocolError("Signed approval key ID does not match the configured trusted public key.")
+        state_dir = _validate_private_state_directory(state_directory)
+        try:
+            executable = os.stat(OPENSSL_BINARY, follow_symlinks=False)
+        except OSError as exc:
+            raise ProtocolError("Required OpenSSL verifier is unavailable.") from exc
+        if (not stat.S_ISREG(executable.st_mode) or executable.st_uid != 0
+                or stat.S_IMODE(executable.st_mode) & 0o022
+                or not executable.st_mode & 0o111):
+            raise ProtocolError("Configured OpenSSL verifier is not a trusted root-owned executable.")
+
+        signature_fd, signature_path = tempfile.mkstemp(
+            prefix="usc-approval-signature-", dir=state_dir
+        )
+        payload_path = None
+        try:
+            os.fchmod(signature_fd, 0o600)
+            with os.fdopen(signature_fd, "wb", closefd=True) as signature_file:
+                signature_file.write(signature)
+                signature_file.flush()
+                os.fsync(signature_file.fileno())
+            payload_fd, payload_path = tempfile.mkstemp(
+                prefix="usc-approval-payload-", dir=state_dir
+            )
+            os.fchmod(payload_fd, 0o600)
+            with os.fdopen(payload_fd, "wb", closefd=True) as payload_file:
+                payload_file.write(canonical_approval_payload(validated))
+                payload_file.flush()
+                os.fsync(payload_file.fileno())
+            command = [
+                OPENSSL_BINARY, "pkeyutl", "-verify", "-pubin",
+                "-inkey", f"/proc/self/fd/{key_fd}",
+                "-sigfile", signature_path, "-in", payload_path, "-rawin",
+            ]
+            try:
+                result = subprocess.run(
+                    command,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=OPENSSL_TIMEOUT_SECONDS,
+                    check=False,
+                    close_fds=True,
+                    pass_fds=(key_fd,),
+                    env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise ProtocolError("Ed25519 approval verifier failed or timed out.") from exc
+            if result.returncode != 0:
+                raise ProtocolError("Ed25519 approval signature is invalid.")
+            return True
+        finally:
+            for temporary_path in (signature_path, payload_path):
+                if temporary_path is not None:
+                    try:
+                        os.unlink(temporary_path)
+                    except FileNotFoundError:
+                        pass
+    finally:
+        os.close(key_fd)
