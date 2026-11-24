@@ -137,7 +137,16 @@ def test_unsigned_v1_submit_is_rejected_but_v1_status_shape_remains_supported():
         "protocol_version": "1",
         "request_id": str(uuid4()),
         "operation": "submit",
-        "job": {},
+        "job": {
+            "approval_id": str(uuid4()),
+            "source_snapshot_sha256": "c" * 64,
+            "profile_id": "python-pytest",
+            "build_image_digest": IMAGE,
+            "exporter_image_digest": EXPORTER,
+            "policy_version": "usc-runner-policy-v1",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+            "release_authorized": False,
+        },
     }
     with pytest.raises(ProtocolError, match="Unsigned"):
         _decode_broker_message(json.dumps(legacy_submit))
