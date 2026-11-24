@@ -59,7 +59,7 @@ def submit_message(authority, *, request_id=None, approval_id=None, nonce=None, 
         },
     }
     payload_path = authority["directory"] / f"payload-{uuid4()}.bin"
-    payload_path.write_bytes(canonical_approval_payload(message))
+    payload_path.write_bytes(canonical_approval_payload(message, now=now))
     payload_path.chmod(0o600)
     try:
         result = subprocess.run(
