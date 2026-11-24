@@ -207,7 +207,10 @@ On failure:
 - [x] Test abrupt broker-process termination after a committed request, stale-socket recovery, normal restart, persisted job state, and replay rejection (Stage 1 crash-recovery test batch).
 - [x] Reject a corrupt SQLite database at startup and inject a mid-submit ledger failure to verify transaction rollback leaves no job or replay record.
 - [x] Kill the broker after a committed request, restart against the same database, verify stale-socket recovery, persisted job state, and replay rejection; reject corrupt state and test rollback after injected mid-submit failure (PR #93; CI #349 passed).
-- [ ] Test recovery during an active commit/power loss, disk-full behavior, backup/restore, retention, and cleanup failure.
+- [x] Test abrupt process death during an uncommitted SQLite transaction after dirty-page pressure; reopening recovers cleanly with no partial job or replay records.
+- [x] Simulate database page exhaustion and verify the complete job/request/nonce transaction rolls back without corrupting the database.
+- [x] Exercise SQLite online backup and restore, verifying job and all replay ledgers survive.
+- [ ] Actual host power loss, storage-device failure, fsync error injection, retention expiry, and cleanup failure remain untested.
 - [x] Add a foreground broker CLI with fixed socket/state/UID arguments and graceful SIGTERM/SIGINT shutdown; add a guarded, hardened systemd example plus a host-provisioning runbook (Stage 1 service-lifecycle batch).
 - [ ] Validate the example on a separately approved dedicated host, including real systemd startup/stop, journaling, and cleanup ownership; no permanent service accounts or units are installed by this project.
 - [x] Specify the signed-approval contract: Ed25519, a trusted public key, canonical job-bound payload, kernel-UID binding, bounded validity window, nonce, replay persistence, and fail-closed verifier behavior (design only; see `docs/approval-signature-contract.md`).
