@@ -23,6 +23,7 @@ class RunnerStateStore:
         self._jobs = {}
         self._request_ids = set()
         self._approval_ids = set()
+        self._nonce_ids = set()
 
     def start(self):
         if self.db_path is None:
@@ -78,8 +79,8 @@ class RunnerStateStore:
             self._db.execute("PRAGMA foreign_keys=ON")
             self._db.execute("PRAGMA trusted_schema=OFF")
             version = self._db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1):
-                raise ProtocolError("Unsupported runner state database version.")
+            if version not in (0, 2):
+                raise ProtocolError("Unsupported runner state database version; explicit state reset is required.")
             self._db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS jobs (
@@ -94,9 +95,12 @@ class RunnerStateStore:
                 CREATE TABLE IF NOT EXISTS seen_requests (
                     request_id TEXT PRIMARY KEY
                 );
+                CREATE TABLE IF NOT EXISTS seen_nonces (
+                    nonce TEXT PRIMARY KEY
+                );
                 """
             )
-            self._db.execute("PRAGMA user_version=1")
+            self._db.execute("PRAGMA user_version=2")
             integrity = self._db.execute("PRAGMA quick_check").fetchone()[0]
             if integrity != "ok":
                 raise ProtocolError("Runner state database integrity check failed.")
@@ -148,6 +152,21 @@ class RunnerStateStore:
         return self._db.execute(
             "SELECT 1 FROM jobs WHERE approval_id = ?", (approval_id,)
         ).fetchone() is not None
+
+    def nonce_seen(self, nonce):
+        if self._db is None:
+            return nonce in self._nonce_ids
+        return self._db.execute(
+            "SELECT 1 FROM seen_nonces WHERE nonce = ?", (nonce,)
+        ).fetchone() is not None
+
+    def record_nonce(self, nonce):
+        if self._db is None:
+            self._nonce_ids.add(nonce)
+        else:
+            self._db.execute(
+                "INSERT INTO seen_nonces(nonce) VALUES (?)", (nonce,)
+            )
 
     def job_count(self):
         if self._db is None:
