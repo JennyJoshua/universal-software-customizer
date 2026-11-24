@@ -18,6 +18,7 @@ import threading
 from pathlib import Path
 from uuid import uuid4
 from .runner_protocol import MAX_MESSAGE_BYTES, ProtocolError, authorize_peer, decode_message
+from .runner_approval import decode_approval_message, verify_ed25519_approval
 from .runner_state import RunnerStateStore
 
 MAX_JOBS = 1000
@@ -58,15 +59,32 @@ def _send_response(connection, value):
     connection.sendall(payload)
 
 
+def _decode_broker_message(raw):
+    """Accept signed v2 submits and v1 job-management operations only."""
+    if isinstance(raw, bytes) and len(raw) > MAX_MESSAGE_BYTES:
+        raise ProtocolError("Protocol message exceeds the byte limit.")
+    try:
+        header = json.loads(raw.decode("utf-8", errors="strict") if isinstance(raw, bytes) else raw)
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+        return decode_message(raw)
+    if isinstance(header, dict) and header.get("protocol_version") == "2":
+        return decode_approval_message(raw)
+    message = decode_message(raw)
+    if message["operation"] == "submit":
+        raise ProtocolError("Unsigned protocol-v1 submissions are disabled.")
+    return message
+
+
 class LocalRunnerBroker:
     """Single-threaded synthetic broker with a private socket and broker-owned state store."""
 
-    def __init__(self, socket_path, *, submitter_uids=frozenset(), operator_uids=frozenset(), socket_gid=None, state_db_path=None):
+    def __init__(self, socket_path, *, submitter_uids=frozenset(), operator_uids=frozenset(), socket_gid=None, state_db_path=None, approval_public_key_path=None):
         self.socket_path = Path(socket_path).expanduser()
         if isinstance(socket_gid, bool) or (socket_gid is not None and (not isinstance(socket_gid, int) or socket_gid <= 0)):
             raise ValueError("socket_gid must be a positive group ID.")
         self.socket_gid = socket_gid
         self._state = RunnerStateStore(state_db_path)
+        self.approval_public_key_path = Path(approval_public_key_path).expanduser() if approval_public_key_path is not None else None
         self.submitter_uids = frozenset(submitter_uids)
         self.operator_uids = frozenset(operator_uids)
         self._listener = None
@@ -161,7 +179,7 @@ class LocalRunnerBroker:
                 try:
                     connection.settimeout(CONNECTION_TIMEOUT_SECONDS)
                     uid = _peer_uid(connection)
-                    message = decode_message(_read_request(connection))
+                    message = _decode_broker_message(_read_request(connection))
                     result = self._dispatch(uid, message)
                     _send_response(connection, {"ok": True, **result})
                 except ProtocolError as exc:
@@ -172,32 +190,53 @@ class LocalRunnerBroker:
     def _dispatch(self, peer_uid, message):
         operation = message["operation"]
         request_id = message["request_id"]
-        with self._state.transaction():
-            if operation == "submit":
-                authorize_peer(peer_uid, operation=operation,
-                               submitter_uids=self.submitter_uids, operator_uids=self.operator_uids)
+        if operation == "submit":
+            if message.get("protocol_version") != "2":
+                raise ProtocolError("Unsigned protocol-v1 submissions are disabled.")
+            if self._state.db_path is None:
+                raise ProtocolError("Signed submissions require broker-owned durable state.")
+            if self.approval_public_key_path is None:
+                raise ProtocolError("Signed submissions require a configured trusted approval public key.")
+            authorize_peer(
+                peer_uid,
+                operation=operation,
+                submitter_uids=self.submitter_uids,
+                operator_uids=self.operator_uids,
+            )
+            verify_ed25519_approval(
+                message,
+                public_key_path=self.approval_public_key_path,
+                state_directory=self._state.db_path.parent,
+                peer_uid=peer_uid,
+            )
+            job_data = message["job"]
+            approval = job_data["approval"]
+            with self._state.transaction():
                 if self._state.request_seen(request_id):
                     raise ProtocolError("Duplicate request ID.")
                 if self._state.job_count() >= MAX_JOBS:
                     raise ProtocolError("Broker job capacity has been reached.")
                 if self._state.request_count() >= MAX_REQUESTS:
                     raise ProtocolError("Broker request capacity has been reached.")
-                job_data = message["job"]
-                if self._state.approval_seen(job_data["approval_id"]):
+                if self._state.approval_seen(approval["approval_id"]):
                     raise ProtocolError("Approval ID has already been submitted.")
+                if self._state.nonce_seen(approval["nonce"]):
+                    raise ProtocolError("Approval nonce has already been used.")
                 job_id = str(uuid4())
                 job = {
                     "owner_uid": peer_uid,
                     "state": "queued",
                     "profile_id": job_data["profile_id"],
                     "source_snapshot_sha256": job_data["source_snapshot_sha256"],
-                    "approval_id": job_data["approval_id"],
+                    "approval_id": approval["approval_id"],
                     "release_authorized": False,
                 }
                 self._state.create_job(job_id, job)
                 self._state.record_request(request_id)
+                self._state.record_nonce(approval["nonce"])
                 return {"job_id": job_id, "state": "queued"}
 
+        with self._state.transaction():
             job_id = message["job_id"]
             job = self._state.get_job(job_id)
             if job is None:
@@ -294,6 +333,7 @@ def main(argv=None):
     parser.add_argument("--socket", required=True, help="Unix-domain socket path")
     parser.add_argument("--socket-gid", type=_positive_int, help="Pre-provisioned client group ID")
     parser.add_argument("--state-db", help="Absolute path to the broker-private SQLite state database")
+    parser.add_argument("--approval-public-key", help="Absolute path to the trusted Ed25519 approval public key")
     parser.add_argument("--submitter-uid", type=_positive_int, action="append", default=[])
     parser.add_argument("--operator-uid", type=_positive_int, action="append", default=[])
     args = parser.parse_args(argv)
@@ -304,6 +344,7 @@ def main(argv=None):
         operator_uids=set(args.operator_uid),
         socket_gid=args.socket_gid,
         state_db_path=args.state_db,
+        approval_public_key_path=args.approval_public_key,
     )
 
     def _stop_handler(_signum, _frame):
