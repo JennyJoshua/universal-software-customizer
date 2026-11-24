@@ -109,7 +109,7 @@ def test_rejects_duplicate_keys_invalid_utf8_and_oversized_payload():
 ])
 def test_rejects_invalid_approval_time_windows(overrides, message):
     with pytest.raises(ProtocolError, match=message):
-        decode_approval_message(approval_message(**overrides), now=NOW)
+        decode_approval_message(json.dumps(approval_message(**overrides)), now=NOW)
 
 
 def test_rejects_non_utc_time_and_expiry_before_issue():
