@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 import stat
 import sqlite3
+import subprocess
+import sys
+from uuid import uuid4
 
 import pytest
 
@@ -150,3 +153,111 @@ def test_state_database_rejects_legacy_schema_v1_without_implicit_migration(tmp_
     path.chmod(0o600)
     with pytest.raises(ProtocolError, match="explicit state reset"):
         RunnerStateStore(path).start()
+
+
+
+def _fixture_job(approval_id):
+    return {
+        "owner_uid": os.getuid(),
+        "state": "queued",
+        "profile_id": "python-pytest",
+        "source_snapshot_sha256": "a" * 64,
+        "approval_id": approval_id,
+        "release_authorized": False,
+    }
+
+
+def test_state_database_recovers_cleanly_after_process_dies_mid_transaction(tmp_path):
+    state_dir = _private_state_dir(tmp_path)
+    path = state_dir / "broker.sqlite3"
+    script = """
+import os, sys
+from customizer.runner_state import RunnerStateStore
+store = RunnerStateStore(sys.argv[1])
+store.start()
+store._db.execute("PRAGMA cache_size=1")
+with store.transaction():
+    store.create_job("crash-job", {
+        "owner_uid": os.getuid(),
+        "state": "queued",
+        "profile_id": "python-pytest",
+        "source_snapshot_sha256": "a" * 64,
+        "approval_id": "crash-approval",
+        "release_authorized": False,
+    })
+    for index in range(1500):
+        store.record_request(f"crash-request-{index:05d}")
+    store.record_nonce("crash-nonce")
+    os._exit(23)
+"""
+    child = subprocess.run([sys.executable, "-c", script, str(path)], check=False)
+    assert child.returncode == 23
+
+    recovered = RunnerStateStore(path)
+    recovered.start()
+    try:
+        assert recovered.job_count() == 0
+        assert recovered.request_count() == 0
+        assert not recovered.approval_seen("crash-approval")
+        assert not recovered.nonce_seen("crash-nonce")
+        assert recovered._db.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    finally:
+        recovered.close()
+
+
+def test_state_database_disk_full_rolls_back_all_replay_writes(tmp_path):
+    state_dir = _private_state_dir(tmp_path)
+    store = RunnerStateStore(state_dir / "broker.sqlite3")
+    store.start()
+    try:
+        current_pages = store._db.execute("PRAGMA page_count").fetchone()[0]
+        effective_limit = store._db.execute(
+            f"PRAGMA max_page_count={current_pages}"
+        ).fetchone()[0]
+        assert effective_limit >= current_pages
+        with pytest.raises(sqlite3.DatabaseError):
+            with store.transaction():
+                store.create_job("full-job", _fixture_job("full-approval"))
+                store.record_request("full-request")
+                store.record_nonce("full-nonce")
+                for index in range(10000):
+                    store.record_request(f"fill-request-{index:05d}")
+        assert store.job_count() == 0
+        assert store.request_count() == 0
+        assert not store.approval_seen("full-approval")
+        assert not store.nonce_seen("full-nonce")
+        assert store._db.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    finally:
+        store.close()
+
+
+def test_state_database_backup_and_restore_preserve_job_and_replay_ledgers(tmp_path):
+    state_dir = _private_state_dir(tmp_path)
+    source_path = state_dir / "source.sqlite3"
+    backup_path = state_dir / "backup.sqlite3"
+    source = RunnerStateStore(source_path)
+    source.start()
+    try:
+        with source.transaction():
+            source.create_job("backup-job", _fixture_job("backup-approval"))
+            source.record_request("backup-request")
+            source.record_nonce("backup-nonce")
+        backup_connection = sqlite3.connect(backup_path)
+        try:
+            source._db.backup(backup_connection)
+        finally:
+            backup_connection.close()
+        backup_path.chmod(0o600)
+    finally:
+        source.close()
+
+    restored = RunnerStateStore(backup_path)
+    restored.start()
+    try:
+        assert restored.get_job("backup-job") == _fixture_job("backup-approval")
+        assert restored.request_seen("backup-request")
+        assert restored.approval_seen("backup-approval")
+        assert restored.nonce_seen("backup-nonce")
+        assert restored._db.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+    finally:
+        restored.close()
