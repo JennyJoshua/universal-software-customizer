@@ -320,21 +320,29 @@ def verify_ed25519_approval(
         signature_fd, signature_path = tempfile.mkstemp(
             prefix="usc-approval-signature-", dir=state_dir
         )
+        payload_path = None
         try:
             os.fchmod(signature_fd, 0o600)
             with os.fdopen(signature_fd, "wb", closefd=True) as signature_file:
                 signature_file.write(signature)
                 signature_file.flush()
                 os.fsync(signature_file.fileno())
+            payload_fd, payload_path = tempfile.mkstemp(
+                prefix="usc-approval-payload-", dir=state_dir
+            )
+            os.fchmod(payload_fd, 0o600)
+            with os.fdopen(payload_fd, "wb", closefd=True) as payload_file:
+                payload_file.write(canonical_approval_payload(validated))
+                payload_file.flush()
+                os.fsync(payload_file.fileno())
             command = [
                 OPENSSL_BINARY, "pkeyutl", "-verify", "-pubin",
                 "-inkey", f"/proc/self/fd/{key_fd}",
-                "-sigfile", signature_path, "-rawin",
+                "-sigfile", signature_path, "-in", payload_path, "-rawin",
             ]
             try:
                 result = subprocess.run(
                     command,
-                    input=canonical_approval_payload(validated),
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     timeout=OPENSSL_TIMEOUT_SECONDS,
@@ -349,10 +357,11 @@ def verify_ed25519_approval(
                 raise ProtocolError("Ed25519 approval signature is invalid.")
             return True
         finally:
-            if signature_path is not None:
-                try:
-                    os.unlink(signature_path)
-                except FileNotFoundError:
-                    pass
+            for temporary_path in (signature_path, payload_path):
+                if temporary_path is not None:
+                    try:
+                        os.unlink(temporary_path)
+                    except FileNotFoundError:
+                        pass
     finally:
         os.close(key_fd)
