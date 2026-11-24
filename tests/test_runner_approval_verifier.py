@@ -62,10 +62,17 @@ def signed_message(private: Path, public: Path):
         },
     }
     payload = canonical_approval_payload(message)
-    result = subprocess.run(
-        [approval.OPENSSL_BINARY, "pkeyutl", "-sign", "-inkey", str(private), "-rawin"],
-        input=payload, capture_output=True, check=True,
-    )
+    payload_path = private.parent / "approval-payload.bin"
+    payload_path.write_bytes(payload)
+    payload_path.chmod(0o600)
+    try:
+        result = subprocess.run(
+            [approval.OPENSSL_BINARY, "pkeyutl", "-sign", "-inkey", str(private),
+             "-in", str(payload_path), "-rawin"],
+            capture_output=True, check=True,
+        )
+    finally:
+        payload_path.unlink(missing_ok=True)
     message["job"]["approval"]["signature"] = base64.b64encode(result.stdout).decode("ascii")
     return message
 
