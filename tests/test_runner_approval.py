@@ -52,7 +52,7 @@ def approval_message(**approval_overrides):
 def test_accepts_v2_signed_submit_and_builds_canonical_payload():
     message = approval_message()
     validated = decode_approval_message(json.dumps(message), now=NOW)
-    payload = json.loads(canonical_approval_payload(validated))
+    payload = json.loads(canonical_approval_payload(validated, now=NOW))
     assert payload["protocol_version"] == "2"
     assert payload["approval_id"] == message["job"]["approval"]["approval_id"]
     assert payload["requester_uid"] == 1200
@@ -67,7 +67,7 @@ def test_canonical_payload_is_stable_and_independent_of_transport_request_id():
     altered_transport = copy.deepcopy(message)
     altered_transport["request_id"] = str(uuid4())
     second = decode_approval_message(json.dumps(altered_transport), now=NOW)
-    assert canonical_approval_payload(first) == canonical_approval_payload(second)
+    assert canonical_approval_payload(first, now=NOW) == canonical_approval_payload(second, now=NOW)
 
 
 @pytest.mark.parametrize("mutation", [

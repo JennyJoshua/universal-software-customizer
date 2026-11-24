@@ -217,7 +217,7 @@ On failure:
 - [x] Verify the configured Ed25519 signature, key fingerprint, expiry, and exact kernel-authenticated requester UID before acceptance.
 - [x] Atomically record the job, request ID, approval ID, and nonce in one broker-owned SQLite transaction; reject duplicate/replayed values and roll back on ledger failure.
 - [x] Extend ephemeral Linux CI with a separate approval-authority UID; verify its synthetic private key is unreadable by runner/control-plane identities and test signed submission plus request/approval/nonce replay after restart (PR #101; CI #371 passed).
-- [ ] Add protocol fuzzing and broader field-by-field signature/tampering/property tests; current tests cover selected critical fields and failure modes.
+- [x] Add deterministic bounded-input fuzzing for random byte strings, randomized JSON envelopes, nested JSON recursion, required-field type mutations, unknown-field injection, unsigned-v1 downgrade attempts, and canonical-payload tampering (Stage 1 protocol fuzz batch; PR pending). The fuzz suite uses fixed seeds and no new dependency.
 - [ ] Independently verify that production control-plane identities cannot access real runner keys, persistent replay state, workspaces, or the Docker daemon.
 - [ ] Define and review a real authenticated approval-authority workflow; a valid signature proves only that the configured key signed the payload, not that a human consented.
   
