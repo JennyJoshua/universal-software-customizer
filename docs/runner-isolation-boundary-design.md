@@ -210,7 +210,7 @@ On failure:
 - [x] Test abrupt process death during an uncommitted SQLite transaction after dirty-page pressure; reopening recovers cleanly with no partial job or replay records.
 - [x] Simulate database page exhaustion and verify the complete job/request/nonce transaction rolls back without corrupting the database.
 - [x] Exercise SQLite online backup and restore, verifying job and all replay ledgers survive.
-- [ ] Actual host power loss, storage-device failure, fsync error injection, retention expiry, and cleanup failure remain untested.
+- [ ] Actual host power loss, storage-device failure, fsync error injection, retention expiry, and cleanup failure remain untested. Process-crash, simulated page-exhaustion, and backup/restore coverage is merged in PR #103 (CI #377).
 - [x] Add a foreground broker CLI with fixed socket/state/UID arguments and graceful SIGTERM/SIGINT shutdown; add a guarded, hardened systemd example plus a host-provisioning runbook (Stage 1 service-lifecycle batch).
 - [ ] Validate the example on a separately approved dedicated host, including real systemd startup/stop, journaling, and cleanup ownership; no permanent service accounts or units are installed by this project.
 - [x] Specify the signed-approval contract: Ed25519, a trusted public key, canonical job-bound payload, kernel-UID binding, bounded validity window, nonce, replay persistence, and fail-closed verifier behavior (design only; see `docs/approval-signature-contract.md`).
@@ -219,8 +219,9 @@ On failure:
 - [x] Integrate protocol-v2 signed submissions into broker acceptance; unsigned protocol-v1 submits are rejected while v1 status/cancel/result remain supported.
 - [x] Verify the configured Ed25519 signature, key fingerprint, expiry, and exact kernel-authenticated requester UID before acceptance.
 - [x] Atomically record the job, request ID, approval ID, and nonce in one broker-owned SQLite transaction; reject duplicate/replayed values and roll back on ledger failure.
-- [x] Extend ephemeral Linux CI with a separate approval-authority UID; verify its synthetic private key is unreadable by runner/control-plane identities and test signed submission plus request/approval/nonce replay after restart (PR #101; CI #371 passed).
-- [x] Add deterministic bounded-input fuzzing for random byte strings, randomized JSON envelopes, nested JSON recursion, required-field type mutations, unknown-field injection, unsigned-v1 downgrade attempts, and canonical-payload tampering (Stage 1 protocol fuzz batch; PR pending). The fuzz suite uses fixed seeds and no new dependency.
+- [x] Extend ephemeral Linux CI with a separate approval-authority UID; verify its synthetic private key is unreadable by runner/control-plane identities and test signed submission plus request/approval/nonce replay after restart (PR #101; CI #371 and #373 passed).
+- [x] Add abrupt-process-death during an uncommitted transaction, simulated database page exhaustion/atomic rollback, and online backup/restore coverage for jobs and all replay ledgers (PR #103; CI #377 passed).
+- [x] Add deterministic bounded-input fuzzing for random byte strings, randomized JSON envelopes, nested JSON recursion, required-field type mutations, unknown-field injection, unsigned-v1 downgrade attempts, and canonical-payload tampering (PR #102; CI #375 passed). The fuzz suite uses fixed seeds and no new dependency.
 - [ ] Independently verify that production control-plane identities cannot access real runner keys, persistent replay state, workspaces, or the Docker daemon.
 - [ ] Define and review a real authenticated approval-authority workflow; a valid signature proves only that the configured key signed the payload, not that a human consented.
   
