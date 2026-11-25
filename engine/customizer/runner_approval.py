@@ -174,12 +174,21 @@ def decode_approval_message(raw: bytes | str, *, now: datetime | None = None) ->
     return message
 
 
-def canonical_approval_payload(message: dict) -> bytes:
-    """Rebuild the exact signed payload from a validated protocol-v2 message."""
-    if not isinstance(message, dict) or message.get("protocol_version") != PROTOCOL_VERSION_V2:
-        raise ProtocolError("A validated protocol-v2 message is required.")
+def canonical_approval_payload(message: dict, *, now: datetime | None = None) -> bytes:
+    """Validate and rebuild the exact signed payload from a protocol-v2 message."""
+    if not isinstance(message, dict):
+        raise ProtocolError("A protocol-v2 message object is required.")
     try:
-        job = message["job"]
+        validated = decode_approval_message(
+            json.dumps(message, separators=(",", ":"), ensure_ascii=True, allow_nan=False),
+            now=now,
+        )
+    except ProtocolError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise ProtocolError("A valid protocol-v2 message is required.") from exc
+    try:
+        job = validated["job"]
         approval = job["approval"]
         payload = {
             "protocol_version": PROTOCOL_VERSION_V2,
