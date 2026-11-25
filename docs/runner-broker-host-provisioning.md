@@ -8,7 +8,7 @@ This runbook describes a dedicated Linux host configuration for the synthetic-on
 - Use a disposable or dedicated Linux host with systemd. Do not use a personal daily-use machine.
 - Keep personal files, browser sessions, SSH keys, cloud credentials, and production secrets off the host.
 - The broker accepts only synthetic metadata. It is not connected to Docker or the build runner.
-- The standalone/broker Ed25519 verification path is implemented for synthetic requests, but an authenticated human-consent workflow, approval-authority governance, and independent security review are still required before customer-source work.
+- The broker enforces protocol-v2 Ed25519 approvals for synthetic requests. An authenticated human-consent workflow, approval-authority governance, production key lifecycle, and independent security review are still required before customer-source work.
 
 ## Intended identities
 
@@ -62,7 +62,7 @@ No command in this repository or CI performs these host changes.
 - The sample unit uses `Restart=no`: after an unexpected exit, inspect the journal and state database before manually restarting.
 - A graceful SIGTERM stops accepting new connections, allows the current request to finish, closes SQLite, and removes the socket. The CLI installs this signal handler; the ephemeral CI integration test exercises it.
 - After SIGKILL, the socket path may remain stale; the broker checks whether it is live before removing an owned stale socket.
-- SQLite schema v2 retains committed job, request, approval, and nonce replay records across normal restarts. Existing schema-v1 databases are rejected and require an explicit, reviewed state reset; the prototype does not silently migrate them. Power-loss/active-commit, disk-full, backup/restore, and retention behavior remain open tests.
+- SQLite schema v2 retains committed job, request, approval, and nonce replay records across normal restarts. Existing schema-v1 databases are rejected and require an explicit, reviewed state reset; the prototype does not silently migrate them. CI now tests abrupt process death during an uncommitted transaction, simulated page exhaustion/rollback, and online backup/restore (PR #103; CI #377 passed). Actual host power loss, storage-device failure, fsync error injection, retention expiry, and cleanup failure remain untested.
 - Review `journalctl -u usc-runner-broker` for startup/shutdown errors. Do not log request contents, credentials, or source material.
 - Never grant access to `/var/run/docker.sock`, host paths, personal directories, or production secrets.
 
@@ -75,4 +75,4 @@ This sample service:
 - Verifies an Ed25519 signature from the configured approval key over the canonical job-bound request. This proves only that the key signed the request; it does not prove that a human personally approved it or that the approval authority's authentication/consent process is trustworthy.
 - Is not a customer pilot or production service.
 
-Before any customer-source pilot: complete independent security review, define an authenticated human-consent and approval-authority governance process, complete crash and storage fault testing, validate retention/deletion policy, review permanent host provisioning, and obtain explicit owner approval. Keep customer repositories disabled until those gates are satisfied.
+Before any customer-source pilot: complete independent security review, define an authenticated human-consent and approval-authority governance process, complete the remaining host power-loss/storage fault tests, validate retention/deletion policy, validate permanent host provisioning on a separately approved dedicated host, and obtain explicit owner approval. Keep customer repositories disabled until those gates are satisfied.
