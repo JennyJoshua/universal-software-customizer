@@ -77,6 +77,7 @@ def test_canonical_payload_is_stable_and_independent_of_transport_request_id():
     lambda m: m["job"].update(source_path="/etc/passwd"),
     lambda m: m["job"].update(release_authorized=True),
     lambda m: m["job"].update(profile_id="arbitrary"),
+    lambda m: m["job"].update(policy_version="usc-runner-policy-v2"),
     lambda m: m["job"]["approval"].update(extra="unexpected"),
     lambda m: m["job"]["approval"].update(requester_uid=0),
     lambda m: m["job"]["approval"].update(requester_uid=True),
