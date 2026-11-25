@@ -191,3 +191,30 @@ def test_rejects_fifo_public_key_without_blocking(signed_fixture, tmp_path):
     os.mkfifo(fifo, 0o600)
     with pytest.raises(ProtocolError, match="regular file"):
         verify(message, fifo, state_dir)
+
+
+@pytest.mark.parametrize(
+    ("path", "replacement"),
+    [
+        (("job", "source_snapshot_sha256"), "e" * 64),
+        (("job", "profile_id"), "python-container-smoke"),
+        (("job", "build_image_digest"), "python:3.12-slim@sha256:" + "b" * 64),
+        (("job", "exporter_image_digest"), "busybox@sha256:" + "c" * 64),
+        (("job", "approval", "approval_id"), str(uuid4())),
+        (("job", "approval", "issued_at"), (NOW + timedelta(seconds=1)).isoformat().replace("+00:00", "Z")),
+        (("job", "approval", "expires_at"), (NOW + timedelta(minutes=6)).isoformat().replace("+00:00", "Z")),
+        (("job", "approval", "nonce"), str(uuid4())),
+        (("job", "approval", "requester_uid"), os.getuid() + 1000),
+        (("job", "approval", "key_id"), "0" * 64),
+        (("job", "approval", "signature"), base64.b64encode(b"x" * 64).decode("ascii")),
+    ],
+)
+def test_rejects_signature_when_any_signed_job_field_is_changed(signed_fixture, path, replacement):
+    message, public, state_dir = signed_fixture
+    target = message
+    for component in path[:-1]:
+        target = target[component]
+    target[path[-1]] = replacement
+
+    with pytest.raises(ProtocolError):
+        verify(message, public, state_dir)
