@@ -1,7 +1,7 @@
 # USC Stage 1 — local Unix-socket broker prototype
 
 **Status:** test-only local IPC prototype  
-**Scope:** synthetic metadata requests with in-memory development state or broker-private SQLite state in group mode. No build execution.
+**Scope:** synthetic metadata only; no build execution. Signed submissions require broker-private durable SQLite state and a configured trusted Ed25519 public key. In-memory mode is limited to local lifecycle/protocol tests and rejects signed submissions.
 
 ## Local test deployment
 
@@ -17,7 +17,7 @@ The prototype broker:
 - Signed submissions require a configured trusted Ed25519 public key, a broker-private durable SQLite state database, an allowlisted kernel-authenticated peer UID, and a valid signature bound to the exact source/profile/image/policy fields.
 - The broker verifies Ed25519 signatures with the fixed root-owned `/usr/bin/openssl` executable; it does not accept caller-selected commands or executables.
 - Signature verification happens before the database write transaction. Job creation and the request-ID, approval-ID, and nonce replay records are then written atomically in one SQLite transaction; any replay or ledger failure rejects the job.
-- Default private development mode may use in-memory state. Group-access mode requires a durable SQLite database in a service-owned 0700 directory; the database is service-owned mode 0600.
+- Default private development mode may use in-memory state for lifecycle/protocol tests, but signed submissions are rejected without durable state. Accepted signed submissions require a SQLite database in a service-owned 0700 directory; the database is service-owned mode 0600.
 - SQLite uses explicit transactions, unique approval-ID and request-ID constraints, a unique nonce replay ledger (schema v2), full synchronous commits, a rollback journal, and a startup integrity check. Job status and all replay IDs survive normal restarts. Schema v1 databases are rejected; this prototype requires an explicit state reset rather than silently migrating older state.
 - The ephemeral CI test kills the broker process after a committed job, restarts it against the same database, verifies stale-socket recovery, checks the job state, and confirms request/approval replays remain rejected.
 - Exposes status/cancel/result metadata only. It does not return artifacts.
@@ -26,7 +26,7 @@ The prototype broker:
 
 The default local test mode runs as the current user with a 0700 directory / 0600 socket. The optional group mode supports a distinct runner UID and client group only when an administrator has provisioned the directory with the exact 2710 ownership/mode policy. The broker checks the connecting UID with kernel peer credentials; group membership alone never authorizes an operation.
 
-CI includes an ephemeral Linux integration test that creates temporary runner, client, and unauthorized-client accounts. It starts the broker as the runner UID, verifies that the client can connect through the group socket but cannot list the socket directory or read a runner-private synthetic key file or SQLite state database, and confirms that an unapproved UID in the same group is denied. It also verifies that the runner/client accounts are not members of the Docker group and cannot read a Docker socket when one is present. These accounts are removed after the test.
+CI includes an ephemeral Linux integration test that creates temporary runner, client, unauthorized-client, and approval-authority accounts. It starts the broker as the runner UID, verifies that the client can connect through the group socket but cannot list the socket directory or read the SQLite state database, and confirms that an unapproved UID in the same group is denied. The approval authority signs synthetic requests with a separate private key that runner, client, and unauthorized identities cannot read; only the public key is installed for broker verification. It also verifies that runner/client/approver accounts are not members of the Docker group and cannot read a Docker socket when one is present. These accounts and keys are removed after the test.
 
 This is a test of the proposed OS permission boundary, not a persistent installation or production service. A future service deployment must still provision and manage its own identities. Before such a deployment, define and test:
 - A dedicated runner service UID with no interactive login and no membership in unrelated groups.
@@ -42,8 +42,9 @@ The ephemeral CI test proves the fixture-level boundary only. It does not provis
 ## Security and functional limitations
 
 - In-memory private development mode loses jobs and replay IDs on restart.
-- SQLite corruption is rejected at startup, and an injected failure between job creation and replay-ledger insertion is tested for transaction rollback. These checks do not prove power-loss durability or recovery from a crash during an active commit.
-- Disk-full behavior, backup/restore, retention, and long-duration stress still need dedicated testing.
+- SQLite corruption is rejected at startup, and an injected failure between job creation and replay-ledger insertion is tested for transaction rollback. A subprocess test also terminates abruptly during an uncommitted transaction after dirty-page pressure; reopening recovers without partial job/replay records (PR #103; CI #377 passed).
+- Simulated database page exhaustion verifies full transaction rollback, and SQLite online backup/restore preserves job and replay ledgers (PR #103; CI #377 passed). These tests do not prove host power-loss durability, storage-device reliability, or fsync behavior.
+- Actual power-loss/storage-failure tests, retention expiry, cleanup failure, and long-duration stress remain open.
 - A valid Ed25519 signature proves that the configured approval key signed the canonical job-bound payload. It does not prove that a human personally approved the job; authentication, review UI, and consent capture are outside this prototype.
 - A queued job is only a synthetic record. No process is started, no Docker daemon is contacted, no source path is opened, and no artifact is produced.
 - Cancellation only changes the synthetic queued state.
@@ -53,7 +54,7 @@ The ephemeral CI test proves the fixture-level boundary only. It does not provis
 
 ## Stage 1 next gates
 
-1. Review the abrupt-process-restart and corruption tests; add disk-full, backup/restore, retention, and cleanup-failure coverage.
-2. Finalize administrator-run service UID/group provisioning, systemd lifecycle, operational logging, and cleanup documentation.
-3. Add protocol fuzzing, field-by-field signature tampering tests, and independent review of the approval-authority identity/key custody before treating signatures as any evidence of human consent.
+1. Complete remaining host power-loss/fsync, retention-expiry, cleanup-failure, and long-duration stress testing; current CI covers process crash, simulated page exhaustion, and online backup/restore.
+2. The administrator-run UID/group provisioning, systemd example, and host-provisioning runbook are documented. Validate them only on a separately approved dedicated host; no permanent service accounts or units have been installed.
+3. Deterministic bounded-input protocol fuzzing is merged (PR #102; CI #375 passed). Independent review of approval-authority identity, private-key custody, and authenticated human-consent capture remains outstanding.
 4. Keep Docker and the existing build runner disconnected until the independent service identity and approval model have been reviewed.
